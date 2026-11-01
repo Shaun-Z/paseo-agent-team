@@ -21,6 +21,7 @@ export const teamProjectsRpc = defineRpc({
   name: "team.projects",
   input: z.object({}),
   output: z.array(ProjectSchema.extend({
+    workspaces: z.array(z.object({ id: z.string(), title: z.string() })),
     teams: z.array(z.object({
       file: z.string(),
       goal: z.string(),
@@ -30,6 +31,26 @@ export const teamProjectsRpc = defineRpc({
     })),
     errors: z.array(z.string()),
   })),
+});
+
+/**
+ * Archives the team's agents in workspaces no other team uses, then deletes its files (including an old `.agents/team.json`).
+ * Agent failures prevent file deletion; file failures are reported separately.
+ */
+export const teamDeleteRpc = defineRpc({
+  name: "team.delete",
+  input: z.object({ projectId: z.string(), file: z.string() }),
+  output: z.object({ files: z.array(z.string()), archived: z.number(), failures: z.array(z.string()), fileFailures: z.array(z.string()) }),
+});
+
+/** Reconnects a team's files to an existing workspace by its current title, without changing agents. */
+export const teamReconnectRpc = defineRpc({
+  name: "team.reconnect",
+  input: z.object({ projectId: z.string(), file: z.string(), workspaceId: z.string() }),
+  output: z.discriminatedUnion("ok", [
+    z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
+    z.object({ ok: z.literal(true), files: z.array(z.string()) }),
+  ]),
 });
 
 /** For the agent dashboard: the teams of a workspace's project, with their roles' workspaces resolved to ids. */

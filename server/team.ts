@@ -1,16 +1,16 @@
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
-import { findOrchestrator, orchestratorsToArchive, LABEL, pendingPlanners, PLANNER_WORKSPACE, plannerCleanup, PROPOSAL_FOR, proposalTarget } from "../shared/cleanup";
+import { findOrchestrator, orchestratorsToArchive, teamAgentsToArchive, LABEL, pendingPlanners, PLANNER_WORKSPACE, plannerCleanup, PROPOSAL_FOR, proposalTarget } from "../shared/cleanup";
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE, withAllowRule } from "../shared/permissions";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
-import type { teamApplyRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "../shared/rpc";
+import type { teamApplyRpc, teamDeleteRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "../shared/rpc";
 import { checkTeam, isSharedRole, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
-import { roleOwnerOf, teamFileFor, teamIn, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
+import { roleOwnerOf, sameTeamFiles, teamFileFor, teamIn, teamWorkspaces, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
 import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
 
 
@@ -62,6 +62,7 @@ export async function projectTeamsList(_input: RpcInput<typeof teamProjectsRpc>,
     const { teams, errors } = await projectTeams(project);
     return {
       ...project,
+      workspaces: entries.filter((entry) => entry.projectId === project.id && !entry.archivingAt).map((entry) => ({ id: entry.id, title: workspaceLabel(entry) })),
       teams: teams.map(({ file, team }) => ({
         file,
         goal: team.goal,
@@ -72,6 +73,50 @@ export async function projectTeamsList(_input: RpcInput<typeof teamProjectsRpc>,
       errors,
     };
   }));
+}
+
+/** Archives the team's agents in workspaces no other team uses, then deletes its files only if archiving succeeds. */
+export async function deleteTeam({ projectId, file }: RpcInput<typeof teamDeleteRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamDeleteRpc>> {
+  const project = await projectOf(paseo, { projectId });
+  const [{ teams }, { entries }, { entries: agentEntries }] = await Promise.all([projectTeams(project), paseo.workspaces.list(), paseo.agents.list()]);
+  // Only a file the listing showed can be deleted, so the path can't point anywhere else.
+  const own = sameTeamFiles(teams, file);
+  if (!own.length) throw new Error(`${file} is not a team file of ${project.name}.`);
+  const idOf = (title: string) => teamWorkspaceId(entries, project.id, title);
+  const workspaceIds = own.flatMap(({ team }) => teamWorkspaces(team)).map(idOf).filter((id): id is string => id !== null);
+  const keep = workspacesOfOtherTeams(teams, own[0]!.team.orchestrator.workspace).map(idOf).filter((id): id is string => id !== null);
+  const agents = agentEntries.map((entry) => entry.agent);
+  const ids = teamAgentsToArchive(agents, workspaceIds.filter((id) => !keep.includes(id)), own.flatMap(({ team }) => team.roles.map((role) => role.name)));
+  const failures = await archiveAgents(paseo, ids, "agent");
+  // Keep the files after an agent failure so deletion can be retried from the same team row.
+  if (failures.length) return { files: [], archived: ids.length - failures.length, failures, fileFailures: [] };
+  const fileFailures: string[] = [];
+  const files: string[] = [];
+  for (const entry of own) {
+    try { await unlink(join(project.root, entry.file)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { fileFailures.push(`file ${entry.file}: ${String(error)}`); continue; }
+    }
+    files.push(entry.file);
+  }
+  return { files, archived: ids.length, failures, fileFailures };
+}
+
+/** Reconnects every file for the team to the selected workspace's current title. */
+export async function reconnectTeam({ projectId, file, workspaceId }: RpcInput<typeof teamReconnectRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamReconnectRpc>> {
+  const project = await projectOf(paseo, { projectId });
+  const [{ teams }, { entries }] = await Promise.all([projectTeams(project), paseo.workspaces.list()]);
+  const own = sameTeamFiles(teams, file);
+  if (!own.length) throw new Error(`${file} is not a team file of ${project.name}.`);
+  const workspace = entries.find((entry) => entry.id === workspaceId && entry.projectId === project.id && !entry.archivingAt);
+  if (!workspace) return { ok: false, errors: [`Workspace ${workspaceId} was not found in ${project.name}.`] };
+  const title = workspaceLabel(workspace);
+  const key = (value: string) => value.trim().toLowerCase();
+  const taken = workspacesOfOtherTeams(teams, own[0]!.team.orchestrator.workspace);
+  if (taken.some((name) => key(name) === key(title))) return { ok: false, errors: [`Workspace "${title}" belongs to another team.`] };
+  if (own.some(({ team }) => team.roles.some((role) => !isSharedRole(role) && key(role.workspace) === key(title)))) return { ok: false, errors: [`Workspace "${title}" is used by this team's role.`] };
+  for (const { file, team } of own) await writeFile(join(project.root, file), serializeTeam({ ...team, orchestrator: { ...team.orchestrator, workspace: title } }), "utf8");
+  return { ok: true, files: own.map((entry) => entry.file) };
 }
 
 export async function teamRoster({ workspaceId }: RpcInput<typeof teamRosterRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamRosterRpc>> {
@@ -210,12 +255,16 @@ export async function roleProposal({ agentId }: RpcInput<typeof teamRoleProposal
   return parsed.ok ? { status: "done", role: parsed.role } : { status: "failed", errors: parsed.errors };
 }
 
+/** Archives agents, returning failures with the caller's label. */
+async function archiveAgents(paseo: PaseoApi, ids: readonly string[], prefix: string): Promise<string[]> {
+  const failures: string[] = [];
+  for (const id of ids) await paseo.agents.ref(id).archive().catch((error: unknown) => failures.push(`${prefix} ${id}: ${String(error)}`));
+  return failures;
+}
+
 /** Archives the planners, then their emptied workspaces; returns what failed instead of throwing. */
 async function archivePlanners(paseo: PaseoApi, targets: { agents: string[]; workspaces: string[] }): Promise<string[]> {
-  const failures: string[] = [];
-  for (const id of targets.agents) {
-    await paseo.agents.ref(id).archive().catch((error: unknown) => failures.push(`planner ${id}: ${String(error)}`));
-  }
+  const failures = await archiveAgents(paseo, targets.agents, "planner");
   for (const id of targets.workspaces) {
     const result = await paseo.workspaces.archive(id).catch((error: unknown) => ({ error: String(error) }));
     if (result.error) failures.push(`workspace ${id}: ${result.error}`);

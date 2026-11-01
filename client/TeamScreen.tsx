@@ -1,11 +1,11 @@
 import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { messages } from "./i18n";
-import { teamProjectsRpc } from "../shared/rpc";
+import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc } from "../shared/rpc";
 import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
 
 export const SCREEN_ID = "team";
@@ -31,6 +31,40 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
   const projects = useProjectTeams();
   const toast = useToast();
   const [projectId, setProjectId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const remove = useRpc(teamDeleteRpc);
+  const reconnect = useRpc(teamReconnectRpc);
+  // The team row waiting for a second press, keyed by project and file.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState<string | null>(null);
+  const invalidateTeams = () => {
+    void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["workspace-agents", "team"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard", "agents"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard", "roster"] });
+  };
+  const deleted = useMutation({
+    mutationFn: (team: { projectId: string; file: string }) => remove(team),
+    onSuccess: (result) => {
+      if (result.failures.length) toast.error(t("screen.deleteFailed", { failure: result.failures.join("; ") }));
+      if (result.fileFailures.length) toast.error(t("screen.deleteFileFailed", { failure: result.fileFailures.join("; ") }));
+      setConfirming(null);
+      invalidateTeams();
+    },
+    onError: (error) => toast.error(String(error)),
+  });
+  const reconnected = useMutation({
+    mutationFn: (input: { projectId: string; file: string; workspaceId: string }) => reconnect(input),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        toast.error(result.errors.join("; "));
+        return;
+      }
+      setReconnecting(null);
+      invalidateTeams();
+    },
+    onError: (error) => toast.error(String(error)),
+  });
 
   if (projectId) {
     return (
@@ -71,6 +105,28 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
               <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
               {!team.workspaceId ? <Text style={s.muted}>{t("screen.workspaceMissing")}</Text> : null}
               <Button s={s} secondary label={t("screen.openTeam")} disabled={!team.workspaceId} onPress={() => team.workspaceId && openTeamPanel?.(team.workspaceId)} />
+              {!team.workspaceId ? <Button s={s} secondary label={t("screen.reconnect")} disabled={reconnected.isPending} onPress={() => setReconnecting(`${project.id}:${team.file}`)} /> : null}
+              <Button s={s} secondary label={t("screen.deleteTeam")} disabled={deleted.isPending} onPress={() => setConfirming(`${project.id}:${team.file}`)} />
+              {!team.workspaceId && reconnecting === `${project.id}:${team.file}` ? (
+                <View style={[s.card, { width: "100%" }]}>
+                  <Text style={s.text}>{t("screen.reconnectPick")}</Text>
+                  <View style={s.row}>
+                    {project.workspaces.map((workspace) => (
+                      <Button key={workspace.id} s={s} label={workspace.title} disabled={reconnected.isPending} onPress={() => reconnected.mutate({ projectId: project.id, file: team.file, workspaceId: workspace.id })} />
+                    ))}
+                    <Button s={s} secondary label={t("review.cancel")} disabled={reconnected.isPending} onPress={() => setReconnecting(null)} />
+                  </View>
+                </View>
+              ) : null}
+              {confirming === `${project.id}:${team.file}` ? (
+                <View style={[s.card, { width: "100%" }]}>
+                  <Text style={s.text}>{t("screen.deleteConfirm", { file: team.file })}</Text>
+                  <View style={s.row}>
+                    <Button s={s} label={t("screen.deleteYes")} disabled={deleted.isPending} onPress={() => deleted.mutate({ projectId: project.id, file: team.file })} />
+                    <Button s={s} secondary label={t("review.cancel")} disabled={deleted.isPending} onPress={() => setConfirming(null)} />
+                  </View>
+                </View>
+              ) : null}
             </View>
           ))}
           <View style={s.row}>

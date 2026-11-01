@@ -1,9 +1,11 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { applyTeam, cancelProposal, pendingProposal, projectTeamsList, proposeRole, proposeTeam, readTeam, restartOrchestrator, roleProposal, teamProposal, teamRoster } from "./server/team";
-import { teamApplyRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "./shared/rpc";
+import { applyTeam, cancelProposal, deleteTeam, pendingProposal, projectTeamsList, proposeRole, proposeTeam, readTeam, reconnectTeam, restartOrchestrator, roleProposal, teamProposal, teamRoster } from "./server/team";
+import { teamApplyRpc, teamDeleteRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "./shared/rpc";
 
 export default function contribute(server: PluginServerContext) {
   server.handle(teamProjectsRpc, projectTeamsList);
+  server.handle(teamDeleteRpc, deleteTeam);
+  server.handle(teamReconnectRpc, reconnectTeam);
   server.handle(teamReadRpc, readTeam);
   server.handle(teamProposeRpc, proposeTeam);
   server.handle(teamProposalRpc, teamProposal);

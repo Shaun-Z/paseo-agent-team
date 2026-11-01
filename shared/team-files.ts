@@ -17,6 +17,12 @@ export function teamIn(files: readonly TeamFile[], workspace: string): TeamFile 
   return files.find((entry) => key(entry.team.orchestrator.workspace) === key(workspace));
 }
 
+/** The file and every other team file for the same orchestrator workspace, such as an old `.agents/team.json` beside its new file. */
+export function sameTeamFiles(files: readonly TeamFile[], file: string): TeamFile[] {
+  const own = files.find((entry) => entry.file === file);
+  return own ? files.filter((entry) => key(entry.team.orchestrator.workspace) === key(own.team.orchestrator.workspace)) : [];
+}
+
 /** The team (by its orchestrator's workspace) and role that use this workspace as the role's own. */
 export function roleOwnerOf(files: readonly TeamFile[], workspace: string): { team: string; role: string } | undefined {
   for (const { team } of files) {
@@ -26,11 +32,16 @@ export function roleOwnerOf(files: readonly TeamFile[], workspace: string): { te
   return undefined;
 }
 
+/** The team's orchestrator and own role workspaces. */
+export function teamWorkspaces(team: Team): string[] {
+  return [team.orchestrator.workspace, ...team.roles.filter((role) => !isSharedRole(role)).map((role) => role.workspace)];
+}
+
 /** The orchestrator and own role workspaces of every team except the one that runs in `workspace`. */
 export function workspacesOfOtherTeams(files: readonly TeamFile[], workspace: string): string[] {
   return files
     .filter((entry) => key(entry.team.orchestrator.workspace) !== key(workspace))
-    .flatMap(({ team }) => [team.orchestrator.workspace, ...team.roles.filter((role) => !isSharedRole(role)).map((role) => role.workspace)]);
+    .flatMap(({ team }) => teamWorkspaces(team));
 }
 
 /** The team's workspaces that another team already uses; teams never share a workspace. */

@@ -72,3 +72,11 @@ export function findOrchestrator(agents: readonly OrchestratorCandidate[], works
 export function orchestratorsToArchive(agents: readonly AgentRef[], workspaceId: string): string[] {
   return agents.filter((agent) => agent.workspaceId === workspaceId && agent.labels[LABEL] === "orchestrator" && !agent.archivedAt).map((agent) => agent.id);
 }
+
+/** What a deleted team leaves to archive: its orchestrators and labelled roles in its workspaces, and planners proposing for them anywhere. */
+export function teamAgentsToArchive(agents: readonly AgentRef[], workspaceIds: readonly string[], roles: readonly string[]): string[] {
+  const names = new Set(roles.map((role) => role.toLowerCase()));
+  return agents
+    .filter((agent) => !agent.archivedAt && ((workspaceIds.includes(agent.workspaceId ?? "") && (agent.labels[LABEL] === "orchestrator" || names.has((agent.labels.role ?? "").toLowerCase()))) || (agent.labels[LABEL] === "planner" && workspaceIds.includes(agent.labels[PROPOSAL_FOR] ?? ""))))
+    .map((agent) => agent.id);
+}

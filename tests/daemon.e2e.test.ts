@@ -3,11 +3,11 @@
 //   PASEO_E2E=1 npx vitest run tests/daemon.e2e.test.ts
 import { createPaseoClient, type PaseoClient } from "@getpaseo/client";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, cancelProposal, pendingProposal, projectTeamsList, proposeRole, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
+import { applyTeam, cancelProposal, deleteTeam, pendingProposal, projectTeamsList, proposeRole, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE } from "../shared/permissions";
 import { isSharedRole, TeamSchema, type Team } from "../shared/team";
@@ -219,5 +219,21 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     // Each workspace reads its own team; the first one is untouched.
     expect((await readTeam({ workspaceId: side }, { paseo })).team?.goal).toBe("Second team");
     expect((await readTeam({ workspaceId: lead.id }, { paseo })).team).toEqual(first.team);
+
+    // An old single-team file for the same orchestrator workspace goes with it.
+    writeFileSync(join(root, ".agents/team.json"), JSON.stringify(second));
+    // Deleting the second team removes both files, archives its orchestrator but leaves its workspaces; the first team stays.
+    const removed = await deleteTeam({ projectId, file: `.agents/teams/${title}.json` }, { paseo });
+    expect(removed.failures).toEqual([]);
+    expect(removed.files.sort()).toEqual([".agents/team.json", `.agents/teams/${title}.json`].sort());
+    expect(removed.archived).toBeGreaterThanOrEqual(1);
+    expect(removed.fileFailures).toEqual([]);
+    expect(existsSync(join(root, ".agents/teams", `${title}.json`))).toBe(false);
+    expect(existsSync(join(root, ".agents/team.json"))).toBe(false);
+    expect((await paseo.agents.ref(applied.orchestratorAgentId).refresh())?.agent.archivedAt).toBeTruthy();
+    expect((await projectWorkspaces()).some((entry) => entry.id === side)).toBe(true);
+    expect((await projectWorkspaces()).some((entry) => entry.id === lead.id)).toBe(true);
+    expect((await readTeam({ workspaceId: lead.id }, { paseo })).team).toEqual(first.team);
+    await expect(deleteTeam({ projectId, file: "../outside.json" }, { paseo })).rejects.toThrow("is not a team file");
   }, 180_000);
 });
