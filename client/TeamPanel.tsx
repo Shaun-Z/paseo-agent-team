@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { freeWorkspace, withFreeWorkspaces } from "../shared/apply-plan";
-import { foldersText, newRole, parseFolders } from "../shared/draft";
+import { foldersText, newRole, parseFolders, uniqueName } from "../shared/draft";
 import { messages } from "./i18n";
 import { teamApplyRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, isSharedRole, type Role, type Team } from "../shared/team";
@@ -168,8 +168,11 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   useEffect(() => {
     if (rolePlanning.data?.status !== "done") return;
     const role = rolePlanning.data.role;
-    const freeRole = (team: Team): Role =>
-      isSharedRole(role) ? role : { ...role, workspace: freeWorkspace(role.workspace, [...titles, team.orchestrator.workspace, ...team.roles.map((other) => other.workspace)]) };
+    const freeRole = (team: Team): Role => ({
+      ...role,
+      name: uniqueName(role.name, team.roles.map((other) => other.name)),
+      workspace: isSharedRole(role) ? role.workspace : freeWorkspace(role.workspace, [...titles, team.orchestrator.workspace, ...team.roles.map((other) => other.workspace)]),
+    });
     setDraft((current) => (current ? { ...current, roles: [...current.roles, freeRole(current)] } : current));
     setRoleDescription("");
     setRolePlannerId(null);

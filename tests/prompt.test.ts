@@ -68,6 +68,11 @@ describe("orchestratorPrompt", () => {
     expect(prompt).toMatch(/unarchived agent.*send/s);
   });
 
+  it("titles started agents <role>#<id> and still labels them with the role", () => {
+    expect(prompt).toContain("--title <role>#<id>");
+    expect(prompt).toContain("role=<role>");
+  });
+
   it("omits the role notes section when no role has instructions", () => {
     const bare = orchestratorPrompt({ ...team, roles: [team.roles[1]!] }, modes, ".agents/team.json");
     expect(bare).not.toContain("Role notes");

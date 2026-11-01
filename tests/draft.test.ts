@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { foldersText, newRole, parseFolders } from "../shared/draft";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { foldersText, newRole, parseFolders, uniqueName } from "../shared/draft";
 import type { ProviderInfo } from "../shared/validate";
 
 const catalog: ProviderInfo[] = [
@@ -17,13 +17,35 @@ describe("parseFolders / foldersText", () => {
   });
 });
 
+describe("uniqueName", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("returns the trimmed base when it is free", () => {
+    expect(uniqueName("  ui  ", ["api"])).toBe("ui");
+  });
+
+  it("adds a #XXXX suffix when the base is taken, ignoring case", () => {
+    expect(uniqueName("ui", ["UI"])).toMatch(/^ui#[0-9A-F]{4}$/);
+  });
+
+  it("does not return the base when a taken name only differs by surrounding spaces", () => {
+    expect(uniqueName("ui", ["ui "])).not.toBe("ui");
+  });
+
+  it("regenerates the suffix until the name is free", () => {
+    // 0xADB2 -> "ADB2" (taken), then 0x0001 -> "0001" (free)
+    vi.spyOn(Math, "random").mockReturnValueOnce(0xadb2 / 0x10000).mockReturnValueOnce(1 / 0x10000);
+    expect(uniqueName("ui", ["ui", "ui#ADB2"])).toBe("ui#0001");
+  });
+});
+
 describe("newRole", () => {
   it("uses the first ready provider and its first model, with a name not already taken", () => {
-    expect(newRole(catalog, ["role-1"])).toEqual({ name: "role-2", workspace: "", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" });
+    expect(newRole(catalog, ["role"])).toEqual({ name: expect.stringMatching(/^role#[0-9A-F]{4}$/), workspace: "", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" });
   });
 
   it("leaves provider and model empty when nothing is ready", () => {
-    expect(newRole([], [])).toMatchObject({ name: "role-1", provider: "", model: "" });
+    expect(newRole([], [])).toMatchObject({ name: "role", provider: "", model: "" });
   });
 
   it("leaves the workspace empty so the role shares the orchestrator's", () => {
