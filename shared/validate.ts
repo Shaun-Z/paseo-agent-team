@@ -6,7 +6,7 @@ export interface ProviderEntry {
   enabled: boolean;
   status: string;
   models?: readonly { id: string; label: string; isSelectable?: boolean }[];
-  modes?: readonly { id: string; isUnattended?: boolean; colorTier?: string }[];
+  modes?: readonly { id: string; label?: string; isUnattended?: boolean; colorTier?: string }[];
 }
 
 export interface ProviderInfo {
@@ -23,8 +23,8 @@ export interface TeamError {
 }
 
 /**
- * The mode new agents start in instead of the provider's default; first match wins: `auto-review`, `auto`, the mode
- * flagged `isUnattended`, then the first `dangerous` one (claude and codex snapshots carry only `colorTier`).
+ * The mode new agents start in instead of the provider's default; first match wins: `auto-review`, `auto`, an id or label
+ * with a word starting with `auto`, then `isUnattended`, then `dangerous` (claude and codex snapshots carry only `colorTier`).
  * `auto-review` precedes `auto` because Codex's `auto` id is Default Permissions, which prompts, while Claude's `auto`
  * and Codex's `auto-review` both auto-review approvals.
  */
@@ -33,6 +33,7 @@ export function agentModeOf(entries: readonly ProviderEntry[], provider: string)
   return (
     modes.find((mode) => mode.id === "auto-review") ??
     modes.find((mode) => mode.id === "auto") ??
+    modes.find((mode) => /(^|[^a-z])auto/i.test(mode.id) || /(^|[^a-z])auto/i.test(mode.label ?? "")) ??
     modes.find((mode) => mode.isUnattended === true) ??
     modes.find((mode) => mode.colorTier === "dangerous")
   )?.id;
