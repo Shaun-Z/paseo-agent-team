@@ -16,6 +16,13 @@ import { z } from "zod";
 import { buildAgentForest, type AgentNode } from "../shared/agent-tree";
 import { providerIcon } from "../shared/provider-icons";
 import { teamRosterRpc } from "../shared/rpc";
+import {
+  applySubagentUpdate,
+  mergeSubagents,
+  subagentAgents,
+  subagentsFromTimeline,
+  type ProviderSubagent,
+} from "../shared/subagents";
 import { messages } from "./i18n";
 
 const RED = "#ff5a5f";
@@ -284,9 +291,9 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 0 },
     // A role with no session yet: dimmed, and nothing to open.
-    opacity: node.waiting ? 0.45 : 1,
+    opacity: node.waiting ? 0.45 : node.kind === "subagent" ? 0.85 : 1,
   };
-  const card = open && !node.waiting ? (
+  const card = open && !node.waiting && node.kind !== "subagent" ? (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={node.title}
@@ -767,6 +774,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
   const client = useQueryClient();
   const { t } = useTranslation(messages);
   const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
+  const [live, setLive] = useState<Record<string, ProviderSubagent>>({});
   const flow = useRef(new Animated.Value(0)).current;
   const glow = useRef(new Animated.Value(0)).current;
   const packet = useRef(new Animated.Value(0)).current;
@@ -829,6 +837,14 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
       paseo.projects.subscribe(refreshWorkspaces),
       paseo.providers.subscribe(refreshProviders),
     ];
+    const events = paseo.observeEvents(["agent.provider_subagents.update"]);
+    events.subscribe({
+      snapshot() {},
+      update(message) {
+        if (message.type === "agent.provider_subagents.update")
+          setLive((current) => applySubagentUpdate(current, message.payload));
+      },
+    });
     let active = true;
     const releases: Array<() => void> = [];
     void paseo.agents
@@ -853,6 +869,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
       .catch(() => {});
     return () => {
       active = false;
+      void events.release();
       off.forEach((f) => f());
       releases.forEach((f) => f());
     };
@@ -889,20 +906,56 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     }
     return defaults;
   }, [providers.data]);
-  const forest = useMemo(() => {
+  const workspaceIds = useMemo(() => {
     const entries = workspaces.data?.entries ?? [];
     const projectId = entries.find(
       (w) => w.id === props.workspaceId,
     )?.projectId;
-    const ids = projectId
+    return projectId
       ? entries.filter((w) => w.projectId === projectId).map((w) => w.id)
       : [];
+  }, [workspaces.data, props.workspaceId]);
+  const unarchivedIds = useMemo(() => {
+    const scope = new Set(workspaceIds);
+    return (agents.data?.entries ?? [])
+      .map((entry) => entry.agent)
+      .filter((agent) => scope.has(agent.workspaceId ?? "") && !agent.archivedAt)
+      .map((agent) => agent.id);
+  }, [agents.data, workspaceIds]);
+  const subagents = useQuery({
+    queryKey: ["dashboard", "subagents", unarchivedIds],
+    queryFn: async () => {
+      const results = await Promise.allSettled(
+        unarchivedIds.map(async (id) => {
+          const page = await paseo.agents
+            .ref(id)
+            .timeline.refetch({ direction: "tail", limit: 200 });
+          return subagentsFromTimeline(id, page.entries);
+        }),
+      );
+      return results.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : [],
+      );
+    },
+  });
+  const forest = useMemo(() => {
+    const parentAgents =
+      agents.data?.entries.map((entry) => entry.agent) ?? [];
+    const merged = mergeSubagents(subagents.data ?? [], live);
     return buildAgentForest(
-      agents.data?.entries.map((entry) => entry.agent) ?? [],
-      ids,
+      [...parentAgents, ...subagentAgents(merged, parentAgents)],
+      workspaceIds,
       { ...state, defaultEfforts, roster: roster.data?.teams },
     );
-  }, [agents.data, workspaces.data, props.workspaceId, state, defaultEfforts, roster.data]);
+  }, [
+    agents.data,
+    subagents.data,
+    live,
+    workspaceIds,
+    state,
+    defaultEfforts,
+    roster.data,
+  ]);
   const icons = useMemo(
     () =>
       new Map(
@@ -940,7 +993,11 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
         ? t("orchestrator")
         : node.kind === "planner"
           ? t("planner")
-          : node.agent.provider),
+          : node.kind === "subagent"
+            ? node.agent.subagentType
+              ? `${t("subagent")} · ${node.agent.subagentType}`
+              : t("subagent")
+            : node.agent.provider),
     waitingLabel: t("waiting"),
   };
   return (

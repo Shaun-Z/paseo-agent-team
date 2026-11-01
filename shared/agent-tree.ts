@@ -15,6 +15,8 @@ export interface DashboardAgent {
   thinkingOptionId?: string | null;
   effectiveThinkingOptionId?: string | null;
   parentAgentId?: string | null;
+  subagent?: true;
+  subagentType?: string | null;
   labels: Record<string, string>;
   archivedAt?: string | null;
   requiresAttention?: boolean;
@@ -22,7 +24,7 @@ export interface DashboardAgent {
   createdAt: string;
 }
 
-export type AgentKind = "orchestrator" | "planner" | "role" | "agent";
+export type AgentKind = "orchestrator" | "planner" | "role" | "agent" | "subagent";
 export type AgentBadge = "attention" | "running" | "done" | null;
 
 export interface AgentNode {
@@ -66,6 +68,7 @@ export function isHidden(agent: DashboardAgent): boolean {
 }
 
 function kindOf(agent: DashboardAgent): AgentKind {
+  if (agent.subagent) return "subagent";
   const job = agent.labels[LABEL];
   if (job === "orchestrator" || job === "planner") return job;
   return agent.labels.role ? "role" : "agent";
