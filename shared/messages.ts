@@ -48,7 +48,6 @@ export const en = {
     propose: "Propose a team",
     blank: "Start with an empty team",
     planning: "The planner is putting the team together…",
-    openPlanner: "Open planner",
   },
   review: {
     title: "Review the proposal",
@@ -140,7 +139,6 @@ export const ko: Shape<typeof en> = {
     propose: "팀 제안 받기",
     blank: "빈 팀으로 시작",
     planning: "계획 에이전트가 팀을 구성하는 중…",
-    openPlanner: "계획 에이전트 열기",
   },
   review: {
     title: "제안 검토",

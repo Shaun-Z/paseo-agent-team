@@ -357,14 +357,13 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   }, [highlightedIndex, picker, pickerQuery]);
   const teamBusy = plannerId !== null && (!planning.data || planning.data.status === "running");
   const progress = applied.isPending
-    ? { status: t("result.applying"), error: null, plannerId: null, onCancel: null }
+    ? { status: t("result.applying"), error: null, onCancel: null }
     : roleBusy
-      ? { status: t("review.rolePlanning"), error: rolePlanning.error ? String(rolePlanning.error) : null, plannerId: null, onCancel: cancelRolePlanning }
+      ? { status: t("review.rolePlanning"), error: rolePlanning.error ? String(rolePlanning.error) : null, onCancel: cancelRolePlanning }
       : teamBusy
         ? {
             status: t("create.planning"),
             error: planning.error ? String(planning.error) : null,
-            plannerId,
             onCancel: () => {
               cancelled.mutate();
               setPlannerId(null);
@@ -412,14 +411,9 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           </View>
           <Text style={s.muted}>{t("progress.keepOpen")}</Text>
           {progress?.error ? <Text style={s.danger}>{progress.error}</Text> : null}
-          {(navigation && progress?.plannerId) || progress?.onCancel ? (
+          {progress?.onCancel ? (
             <View style={s.row}>
-              {navigation && progress?.plannerId ? (
-                <Button s={s} secondary label={t("create.openPlanner")} onPress={() => navigation.openAgent({ agentId: progress.plannerId! })} />
-              ) : null}
-              {progress?.onCancel ? (
-                <Button s={s} secondary label={t("review.cancel")} onPress={progress.onCancel} />
-              ) : null}
+              <Button s={s} secondary label={t("review.cancel")} onPress={progress.onCancel} />
             </View>
           ) : null}
         </Modal.Content>
@@ -539,7 +533,6 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           </View>
           {planning.data?.status === "failed" ? planning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
           {start.error ? <Text style={s.danger}>{String(start.error)}</Text> : null}
-          {plannerId && navigation ? <Button s={s} secondary label={t("create.openPlanner")} onPress={() => navigation.openAgent({ agentId: plannerId })} /> : null}
         </View>
       ) : (
         <SelectContext.Provider value={openSelect}>
