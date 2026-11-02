@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Team } from "../shared/team";
-import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
+import { agentFeaturesOf, catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
 
 const entries: ProviderEntry[] = [
   {
@@ -197,5 +197,29 @@ describe("roleModes", () => {
   it("leaves a role without a mode undefined", () => {
     const noModes = { ...team, roles: [{ ...team.roles[0]!, provider: "omp" }] };
     expect(roleModes(noModes, entries)).toEqual({ design: undefined });
+  });
+});
+
+describe("agentFeaturesOf", () => {
+  const cursor = (modes: NonNullable<ProviderEntry["modes"]>): ProviderEntry[] => [{ provider: "cursor", enabled: true, status: "ready", modes }];
+  const noAuto = cursor([{ id: "agent", label: "Agent" }, { id: "plan", label: "Plan" }, { id: "ask", label: "Ask" }]);
+  const toggle = { id: "auto_accept", type: "toggle" };
+
+  it("turns auto_accept on when the provider has no auto mode and offers the toggle", () => {
+    expect(agentModeOf(noAuto, "cursor")).toBeUndefined();
+    expect(agentFeaturesOf(noAuto, "cursor", [{ id: "other", type: "select" }, toggle])).toEqual({ auto_accept: true });
+  });
+
+  it("is undefined when the provider has an auto mode", () => {
+    expect(agentFeaturesOf(cursor([{ id: "auto" }, { id: "agent" }]), "cursor", [toggle])).toBeUndefined();
+  });
+
+  it("is undefined when the toggle is missing", () => {
+    expect(agentFeaturesOf(noAuto, "cursor", [])).toBeUndefined();
+    expect(agentFeaturesOf(noAuto, "cursor", [{ id: "other", type: "toggle" }])).toBeUndefined();
+  });
+
+  it("is undefined when the auto_accept feature is not a toggle", () => {
+    expect(agentFeaturesOf(noAuto, "cursor", [{ id: "auto_accept", type: "select" }])).toBeUndefined();
   });
 });

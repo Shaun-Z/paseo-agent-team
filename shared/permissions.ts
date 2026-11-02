@@ -1,11 +1,17 @@
 import type { Team } from "./team";
-import { agentModeOf, type ProviderEntry } from "./validate";
+import { agentModeOf, type AgentFeatures, type ProviderEntry } from "./validate";
 
 /** The project's local Claude settings; Paseo starts Claude agents with user, project and local settings. */
 export const CLAUDE_LOCAL_SETTINGS = ".claude/settings.local.json";
 
 /** A narrow allow rule, which Claude's Auto mode honours instead of asking its reviewer. */
 export const PASEO_RUN_RULE = "Bash(paseo run *)";
+export const PASEO_CREATE_AGENT_RULE = "mcp__paseo__create_agent";
+
+/** Auto accept approves every ACP permission without a reviewer, so Claude must allow starting it. */
+export function needsCreateAgentPermission(team: Team, features: Record<string, AgentFeatures>): boolean {
+  return team.orchestrator.provider === "claude" && team.roles.some((role) => features[role.name]?.auto_accept === true);
+}
 
 /**
  * Whether the team's Claude orchestrator has to start a role in the mode chosen for it that runs unattended (such as

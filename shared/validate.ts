@@ -44,6 +44,15 @@ export function roleModes(team: Team, entries: readonly ProviderEntry[]): Record
   return Object.fromEntries(team.roles.map((role) => [role.name, agentModeOf(entries, role.provider)]));
 }
 
+export type AgentFeatures = { auto_accept: true } | undefined;
+
+/** Use the provider's auto-accept toggle only when no automatic agent mode was found. */
+export function agentFeaturesOf(entries: readonly ProviderEntry[], provider: string, features: readonly { id: string; type: string }[]): AgentFeatures {
+  return agentModeOf(entries, provider) === undefined && features.some((feature) => feature.id === "auto_accept" && feature.type === "toggle")
+    ? { auto_accept: true }
+    : undefined;
+}
+
 /** The enabled providers and their selectable models. */
 export function catalogFrom(entries: readonly ProviderEntry[]): ProviderInfo[] {
   return entries

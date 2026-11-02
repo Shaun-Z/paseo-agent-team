@@ -109,3 +109,44 @@ describe("teamChangedMessage", () => {
     expect(message).toMatch(/never substitute another mode or provider/i);
   });
 });
+
+describe("role features", () => {
+  const file = ".agents/teams/orchestrator.json";
+  const features = { design: { auto_accept: true as const }, sound: undefined };
+  const rule = 'For roles with Features other than "-", use the Paseo `create_agent` tool';
+
+  it("renders the same as the 3-argument call without features", () => {
+    const orchestrator = orchestratorPrompt(team, modes, file);
+    const changed = teamChangedMessage(team, modes, file);
+    for (const none of [undefined, { design: undefined, sound: undefined }]) {
+      expect(orchestratorPrompt(team, modes, file, none)).toBe(orchestrator);
+      expect(teamChangedMessage(team, modes, file, none)).toBe(changed);
+    }
+    expect(orchestrator).not.toContain("Features");
+    expect(orchestrator).not.toContain("create_agent");
+    expect(changed).not.toContain("create_agent");
+  });
+
+  it("adds a Features column with the toggle for the role that has it and - for the others", () => {
+    for (const text of [orchestratorPrompt(team, modes, file, features), teamChangedMessage(team, modes, file, features)]) {
+      expect(text).toContain("| Role | Provider/model | Mode | Folders | Features |");
+      expect(text).toContain("| --- | --- | --- | --- | --- |");
+      expect(text).toContain('| design | codex/gpt-6.1-sol | full-access | src/ui, assets/images | {"auto_accept":true} |');
+      expect(text).toContain("| sound | antigravity/gemini-4-argon-high | default | (any) | - |");
+    }
+  });
+
+  it("bulleted create_agent rule in the orchestrator prompt, unbulleted in the team-changed message", () => {
+    const prompt = orchestratorPrompt(team, modes, file, features);
+    const message = teamChangedMessage(team, modes, file, features);
+    expect(prompt).toContain(`- ${rule}`);
+    expect(message).toContain(rule);
+    expect(message).not.toContain(`- ${rule}`);
+    expect(message.split("\n").some((line) => line.startsWith(rule))).toBe(true);
+  });
+
+  it("says paseo run cannot set features", () => {
+    expect(orchestratorPrompt(team, modes, file, features)).toContain("`paseo run` cannot set features");
+    expect(teamChangedMessage(team, modes, file, features)).toContain("`paseo run` cannot set features");
+  });
+});

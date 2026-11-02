@@ -4,18 +4,34 @@ import { access, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/pro
 import { dirname, join } from "node:path";
 import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
 import { findOrchestrator, orchestratorsToArchive, teamAgentsToArchive, LABEL, pendingPlanners, PLANNER_WORKSPACE, plannerCleanup, PROPOSAL_FOR, proposalTarget } from "../shared/cleanup";
-import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE, withAllowRule } from "../shared/permissions";
+import { CLAUDE_LOCAL_SETTINGS, needsCreateAgentPermission, needsRunPermission, PASEO_CREATE_AGENT_RULE, PASEO_RUN_RULE, withAllowRule } from "../shared/permissions";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractInstructions, extractProposal, extractRole, INSTRUCTIONS_JSON_SCHEMA, instructionsPrompt, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
 import type { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
 import { legacyWorkspacesOf, sameTeamFiles, teamFileFor, teamFileWorkspaces, teamIn, workspaceOwnerOf, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
-import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
+import { agentFeaturesOf, catalogFrom, roleModes, agentModeOf, type AgentFeatures, validateTeam, type ProviderEntry } from "../shared/validate";
 
 
 type PaseoApi = PluginHandlerContext["paseo"];
 type Target = { workspaceId: string } | { projectId: string };
+
+/** Feature discovery is optional: an unavailable provider must not prevent applying a team. */
+async function featuresFor(paseo: PaseoApi, entries: readonly ProviderEntry[], provider: string, cwd: string): Promise<AgentFeatures> {
+  const id = provider.split("/")[0]!;
+  if (agentModeOf(entries, id) !== undefined) return undefined;
+  try {
+    const result = await paseo.providers.listFeatures({ provider, cwd });
+    return agentFeaturesOf(entries, id, result.features ?? []);
+  } catch {
+    return undefined;
+  }
+}
+
+async function roleFeaturesFor(paseo: PaseoApi, entries: readonly ProviderEntry[], team: Team, cwd: string): Promise<Record<string, AgentFeatures>> {
+  return Object.fromEntries(await Promise.all(team.roles.map(async (role) => [role.name, await featuresFor(paseo, entries, `${role.provider}/${role.model}`, cwd)])));
+}
 
 async function allProjects(paseo: PaseoApi): Promise<ProjectRef[]> {
   const { projects } = await paseo.projects.list();
@@ -198,8 +214,9 @@ export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamPropo
   await archivePlannersFor(paseo, target).catch(() => undefined);
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
+  const featureValues = await featuresFor(paseo, entries, provider, (await projectOf(paseo, target)).root);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!), ...(featureValues ? { featureValues } : {}) },
     title: "Team planner",
     prompt: plannerPrompt(goal, catalogFrom(entries)),
     outputSchema: TEAM_JSON_SCHEMA,
@@ -237,8 +254,9 @@ export async function teamProposal({ agentId }: RpcInput<typeof teamProposalRpc>
 export async function proposeRole({ description, team, ...target }: RpcInput<typeof teamRoleProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamRoleProposeRpc>> {
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
+  const featureValues = await featuresFor(paseo, entries, provider, (await projectOf(paseo, target)).root);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!), ...(featureValues ? { featureValues } : {}) },
     title: "Role planner",
     prompt: rolePrompt(description, team, catalogFrom(entries)),
     outputSchema: ROLE_JSON_SCHEMA,
@@ -257,8 +275,9 @@ export async function roleProposal({ agentId }: RpcInput<typeof teamRoleProposal
 export async function improveInstructions({ role, request, team, ...target }: RpcInput<typeof teamInstructionsImproveRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamInstructionsImproveRpc>> {
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
+  const featureValues = await featuresFor(paseo, entries, provider, (await projectOf(paseo, target)).root);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!), ...(featureValues ? { featureValues } : {}) },
     title: "Instructions planner",
     prompt: instructionsPrompt(role, request, team),
     outputSchema: INSTRUCTIONS_JSON_SCHEMA,
@@ -295,7 +314,7 @@ async function archivePlanners(paseo: PaseoApi, targets: { agents: string[]; wor
  * Lets the project's Claude orchestrator start agents with `paseo run`, so its Auto-mode reviewer can't deny a role
  * that runs unattended. Returns the settings file when the rule was added, null when it was already there.
  */
-async function allowPaseoRun(project: ProjectRef): Promise<{ ok: true; file: string | null } | { ok: false; errors: string[] }> {
+async function allowPaseoRun(project: ProjectRef, rules: string[] = [PASEO_RUN_RULE]): Promise<{ ok: true; file: string | null } | { ok: false; errors: string[] }> {
   const file = join(project.root, CLAUDE_LOCAL_SETTINGS);
   const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return "{}";
@@ -308,17 +327,18 @@ async function allowPaseoRun(project: ProjectRef): Promise<{ ok: true; file: str
     return { ok: false, errors: [`${CLAUDE_LOCAL_SETTINGS} is not valid JSON: ${(error as Error).message}`] };
   }
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return { ok: false, errors: [`${CLAUDE_LOCAL_SETTINGS} is not a JSON object`] };
-  const next = withAllowRule(settings as Record<string, unknown>, PASEO_RUN_RULE);
-  if (!next) return { ok: true, file: null };
+  let next = settings as Record<string, unknown>;
+  for (const rule of rules) next = withAllowRule(next, rule) ?? next;
+  if (next === settings) return { ok: true, file: null };
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify(next, null, 2) + "\n", "utf8");
   return { ok: true, file };
 }
 
 /** Starts an orchestrator with the same configuration for apply and restart. */
-async function startOrchestrator(paseo: PaseoApi, workspaceId: string, team: Team, modes: ReturnType<typeof roleModes>, orchestratorMode: ReturnType<typeof agentModeOf>, relative: string) {
+async function startOrchestrator(paseo: PaseoApi, workspaceId: string, team: Team, modes: ReturnType<typeof roleModes>, orchestratorMode: ReturnType<typeof agentModeOf>, relative: string, features: Record<string, AgentFeatures>, featureValues: AgentFeatures) {
   return paseo.workspaces.ref(workspaceId).agents.create({
-    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: orchestratorMode, systemPrompt: orchestratorPrompt(team, modes, relative) },
+    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: orchestratorMode, ...(featureValues ? { featureValues } : {}), systemPrompt: orchestratorPrompt(team, modes, relative, features) },
     title: "Orchestrator",
     prompt: `Read ${relative}, then reply with a short summary of the team (role, workspace, provider/model) and say you are ready for a request. Do not start any agents yet. In your ready reply, tell the user that /clear makes you lose your orchestrator role and that the team panel's "Reset session" button gives a fresh conversation that keeps the role.`,
     labels: { [LABEL]: "orchestrator" },
@@ -338,6 +358,11 @@ export async function restartOrchestrator(target: RpcInput<typeof teamRestartOrc
   const { entries } = await paseo.workspaces.list();
   const workspaceId = teamWorkspaceId(entries, project.id, team.orchestrator.workspace);
   if (!workspaceId) return { ok: false, errors: [`Workspace ${team.orchestrator.workspace} was not found.`] };
+  const features = await roleFeaturesFor(paseo, providers, team, project.root);
+  const featureValues = await featuresFor(paseo, providers, `${team.orchestrator.provider}/${team.orchestrator.model}`, project.root);
+  const rules = [ ...(needsRunPermission(team, providers) ? [PASEO_RUN_RULE] : []), ...(needsCreateAgentPermission(team, features) ? [PASEO_CREATE_AGENT_RULE] : []) ];
+  const permission = rules.length ? await allowPaseoRun(project, rules) : { ok: true as const, file: null };
+  if (!permission.ok) return { ok: false, errors: permission.errors };
   const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent);
   const archived = orchestratorsToArchive(agents, workspaceId);
   const failures: string[] = [];
@@ -345,7 +370,7 @@ export async function restartOrchestrator(target: RpcInput<typeof teamRestartOrc
     await paseo.agents.ref(id).archive().catch((error: unknown) => failures.push(`orchestrator ${id}: ${String(error)}`));
   }
   if (failures.length) return { ok: false, errors: failures };
-  const orchestrator = await startOrchestrator(paseo, workspaceId, team, roleModes(team, providers), agentModeOf(providers, team.orchestrator.provider), file);
+  const orchestrator = await startOrchestrator(paseo, workspaceId, team, roleModes(team, providers), agentModeOf(providers, team.orchestrator.provider), file, features, featureValues);
   return { ok: true, orchestratorAgentId: orchestrator.id, archived };
 }
 
@@ -362,7 +387,10 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   // Teams never share a workspace, so one team's role sessions can't mix with another's.
   const clashes = workspaceClashes(team, workspacesOfOtherTeams(teams, team.orchestrator.workspace));
   if (clashes.length) return { ok: false, errors: clashes.map((problem) => `${problem.target}: ${problem.message}`) };
-  const permission = needsRunPermission(team, providers) ? await allowPaseoRun(project) : { ok: true as const, file: null };
+  const features = await roleFeaturesFor(paseo, providers, team, project.root);
+  const featureValues = await featuresFor(paseo, providers, `${team.orchestrator.provider}/${team.orchestrator.model}`, project.root);
+  const rules = [ ...(needsRunPermission(team, providers) ? [PASEO_RUN_RULE] : []), ...(needsCreateAgentPermission(team, features) ? [PASEO_CREATE_AGENT_RULE] : []) ];
+  const permission = rules.length ? await allowPaseoRun(project, rules) : { ok: true as const, file: null };
   if (!permission.ok) return { ok: false, errors: permission.errors };
   const relative = teamFileFor(team, teams, names);
   const file = join(project.root, relative);
@@ -380,9 +408,9 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent);
   const running = findOrchestrator(agents, lead.id, team, orchestratorMode);
   if (running) {
-    await paseo.agents.ref(running.id).send(teamChangedMessage(team, modes, relative));
+    await paseo.agents.ref(running.id).send(teamChangedMessage(team, modes, relative, features));
     return { ok: true, file, workspaces, orchestratorAgentId: running.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)), permission: permission.file };
   }
-  const orchestrator = await startOrchestrator(paseo, lead.id, team, modes, orchestratorMode, relative);
+  const orchestrator = await startOrchestrator(paseo, lead.id, team, modes, orchestratorMode, relative, features, featureValues);
   return { ok: true, file, workspaces, orchestratorAgentId: orchestrator.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)), permission: permission.file };
 }
