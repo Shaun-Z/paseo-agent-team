@@ -822,15 +822,30 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     return () => animation.stop();
   }, [flow]);
   useEffect(() => {
-    // Applying a team starts or messages an orchestrator, so the roster is re-read with the agents.
-    const refreshAgents = () => {
-      void client.invalidateQueries({ queryKey: ["dashboard", "agents"] });
-      void client.invalidateQueries({ queryKey: ["dashboard", "roster"] });
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const coalesce = (fn: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      return () => {
+        if (timer !== null) return;
+        timer = setTimeout(() => {
+          timers.delete(timer!);
+          timer = null;
+          fn();
+        }, 1000);
+        timers.add(timer);
+      };
     };
-    const refreshWorkspaces = () =>
-      void client.invalidateQueries({ queryKey: ["dashboard", "workspaces"] });
-    const refreshProviders = () =>
-      void client.invalidateQueries({ queryKey: ["dashboard", "providers"] });
+    const invalidate = (key: string) =>
+      void client.invalidateQueries(
+        { queryKey: ["dashboard", key] },
+        { cancelRefetch: false },
+      );
+    const refreshAgents = coalesce(() => invalidate("agents"));
+    const refreshWorkspaces = coalesce(() => {
+      invalidate("workspaces");
+      invalidate("roster");
+    });
+    const refreshProviders = coalesce(() => invalidate("providers"));
     const off = [
       paseo.agents.subscribe(refreshAgents),
       paseo.workspaces.subscribe(refreshWorkspaces),
@@ -869,6 +884,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
       .catch(() => {});
     return () => {
       active = false;
+      timers.forEach(clearTimeout);
       void events.release();
       off.forEach((f) => f());
       releases.forEach((f) => f());

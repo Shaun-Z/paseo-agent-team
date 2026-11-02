@@ -489,6 +489,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
     onSuccess: (result) => {
       void current.refetch();
       void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", "roster"] });
       if (result.ok) onApplied?.(result);
     },
   });

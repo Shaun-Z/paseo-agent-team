@@ -135,8 +135,11 @@ export async function reconnectTeam({ projectId, file, workspaceId }: RpcInput<t
 }
 
 export async function teamRoster({ workspaceId }: RpcInput<typeof teamRosterRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamRosterRpc>> {
-  const project = await projectOf(paseo, { workspaceId });
-  const [{ teams, errors }, { entries }] = await Promise.all([projectTeams(project), paseo.workspaces.list()]);
+  const { entries } = await paseo.workspaces.list();
+  const workspace = entries.find((entry) => entry.id === workspaceId);
+  if (!workspace) throw new Error(`Workspace ${workspaceId} was not found.`);
+  const project: ProjectRef = { id: workspace.projectId, name: workspace.projectCustomName || workspace.projectDisplayName, root: workspace.projectRootPath };
+  const { teams, errors } = await projectTeams(project);
   const idOf = (title: string) => teamWorkspaceId(entries, project.id, title);
   return {
     teams: teams.map(({ team }) => {
