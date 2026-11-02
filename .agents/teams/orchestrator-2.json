@@ -9,7 +9,6 @@
   "roles": [
     {
       "name": "core",
-      "workspace": "",
       "provider": "codex",
       "model": "gpt-6.1-sol",
       "folders": [
@@ -21,7 +20,6 @@
     },
     {
       "name": "ui",
-      "workspace": "",
       "provider": "antigravity",
       "model": "gemini-4-argon-high",
       "folders": [
@@ -33,7 +31,6 @@
     },
     {
       "name": "qa",
-      "workspace": "",
       "provider": "claude",
       "model": "claude-sonnet-5-5",
       "folders": [
@@ -43,7 +40,6 @@
     },
     {
       "name": "docs",
-      "workspace": "",
       "provider": "claude",
       "model": "claude-haiku-5-5",
       "folders": [
@@ -56,13 +52,19 @@
     },
     {
       "name": "release",
-      "workspace": "",
       "provider": "claude",
       "model": "claude-sonnet-5-5",
       "folders": [
         ".claude/skills/deploy"
       ],
       "instructions": "Run releases by following .claude/skills/deploy/SKILL.md, and only after typecheck and tests pass: bump the version, tag and push, create the GitHub release, then open a PR on getpaseo/plugins that pins the release commit in plugins/gyuha/agent-team.json. Ask docs for the version bump in package.json and the OVERVIEW.md/README updates instead of editing those files yourself, and never use labeled submission issues."
+    },
+    {
+      "name": "review",
+      "provider": "claude",
+      "model": "claude-opus-5-5",
+      "folders": [],
+      "instructions": "Review the diffs produced by other roles before they are handed back to the orchestrator, checking correctness, the plugin constraints in CLAUDE.md (no @getpaseo/client in server code, pure shared/, theme.colors in client UI), consistency with .forge/CONTEXT.md terms and ADRs, and that typecheck and tests pass. Report concrete findings with file:line references to the orchestrator and do not edit files yourself."
     }
   ]
 }
