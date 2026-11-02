@@ -4,7 +4,7 @@ A [Paseo](https://paseo.sh) plugin for project-scoped agent teams. Each role in 
 
 For example, in a game project, design work can go to Codex, sound to Antigravity and gameplay code to Claude. You describe the goal once, review the proposed team, and from then on you talk to one orchestrator.
 
-![Reviewing a proposed team: one orchestrator and four roles, each with its own provider, model, folders and instructions](images/create-agent-team.png)
+![Reviewing a proposed team: the orchestrator card on top and six roles (core, ui, qa, docs, release, review) in three columns below it, each with a role name, provider and model, folders or a Set folders button, and instructions](images/create-agent-team.png)
 
 ## Concepts
 
@@ -117,7 +117,11 @@ Delete → archive the team's agents → delete the team's files
 
 The **Agent dashboard** panel (**에이전트 대시보드** in Korean) opens as a workspace tab or in the right sidebar next to Files and Changes, and shows the project's agents as a tree. An agent started by another agent appears under that agent, so role agents started by the orchestrator sit under it. Agents with no parent are roots, and roots without children are listed under **Solo agents**. Roles of the team that are not started yet appear under the newest orchestrator of the team's workspace as dimmed **Waiting** cards on a dashed line; a waiting card is replaced by the real card once an agent labelled with that role shows up in the team's workspace. Provider sub-agents, such as the sub-agents Claude Code starts with its Agent tool, appear as lighter **Sub-agent** cards (**하위 에이전트** in Korean) under the Paseo agent that spawned them, labelled with their sub-agent type. They can't be opened, since they are not Paseo agents. Running sub-agents always show; finished ones show only when **Show closed** is on.
 
-![Agent dashboard capture: an orchestrator with four role agents, where core and ui are running and tests and release have finished](images/agent-dashboard.gif)
+![Agent dashboard capture shown as a workspace tab: the Orchestrator card on the left and six role agents (ui, docs, release, core, qa, review) on the right, where docs, core, qa and review are running and ui and release have finished](images/agent-dashboard.gif)
+
+The Agent dashboard can also sit in the right sidebar while you work in the center of the window.
+
+![Paseo window with the Agent team panel in the center and the Agent dashboard in the right sidebar next to Files and Changes; the orchestrator card is shrunk to its provider icon and model name, and the role cards run off to the right with a horizontal scrollbar at the bottom](images/agent-dashboard-sidebar.png)
 
 The capture shows the orchestrator as the root card, with four role agents under it. `core` and `ui` are running: their cards glow softly, and command packets travel from the orchestrator along the path to them, flashing each card on arrival. `tests` and `release` have finished and show ✓.
 
