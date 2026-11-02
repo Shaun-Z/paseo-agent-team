@@ -12,7 +12,7 @@ const proposal = {
   version: 1,
   goal: "2D platformer game",
   orchestrator: { workspace: "orchestrator", provider: "claude", model: "claude-opus-5-5" },
-  roles: [{ name: "design", workspace: "design", provider: "codex", model: "gpt-6.1-sol", folders: ["src/ui"], instructions: "UI" }],
+  roles: [{ name: "design", provider: "codex", model: "gpt-6.1-sol", folders: ["src/ui"], instructions: "UI" }],
 };
 
 describe("plannerPrompt", () => {
@@ -30,22 +30,23 @@ describe("plannerPrompt", () => {
     const example = JSON.parse(prompt.slice(start, prompt.lastIndexOf("}") + 1));
     expect(Object.keys(example)).toEqual(["version", "goal", "orchestrator", "roles"]);
     expect(Object.keys(example.orchestrator)).toEqual(["workspace", "provider", "model"]);
-    expect(Object.keys(example.roles[0])).toEqual(["name", "workspace", "provider", "model", "folders", "instructions"]);
+    expect(Object.keys(example.roles[0])).toEqual(["name", "provider", "model", "folders", "instructions"]);
   });
 
   it("forbids changing files", () => {
     expect(prompt).toMatch(/do not (create|change|edit)/i);
   });
 
-  it("shows roles with an empty workspace in the example", () => {
+  it("shows roles without a workspace in the example", () => {
     const example = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1));
-    expect(example.roles[0].workspace).toBe("");
+    expect(example.roles[0]).not.toHaveProperty("workspace");
   });
 
-  it("tells the planner to leave workspaces empty unless a role needs a separate one", () => {
-    expect(prompt).toMatch(/empty string/);
+  it("says every role runs in the orchestrator's workspace and offers no role workspace", () => {
     expect(prompt).toMatch(/orchestrator's workspace/);
-    expect(prompt).toMatch(/separate/);
+    expect(prompt).not.toMatch(/empty string/);
+    expect(prompt).not.toMatch(/own short lowercase workspace/);
+    expect(prompt).not.toMatch(/its own Paseo workspace/);
   });
 });
 
@@ -54,11 +55,11 @@ describe("TEAM_JSON_SCHEMA", () => {
     expect(TEAM_JSON_SCHEMA.required).toEqual(["version", "goal", "orchestrator", "roles"]);
   });
 
-  it("keeps a role's workspace required but lets it be an empty string", () => {
+  it("has no workspace property on a role", () => {
     const role = TEAM_JSON_SCHEMA.properties.roles.items;
-    expect(role.required).toContain("workspace");
-    expect(role.properties.workspace).toEqual({ type: "string" });
-    expect(ROLE_JSON_SCHEMA.properties.workspace).toEqual({ type: "string" });
+    expect(role.required).not.toContain("workspace");
+    expect(role.properties).not.toHaveProperty("workspace");
+    expect(ROLE_JSON_SCHEMA.properties).not.toHaveProperty("workspace");
   });
 
   it("still requires the orchestrator's workspace to be non-empty", () => {
@@ -76,9 +77,11 @@ describe("extractProposal", () => {
     expect(extractProposal(text).ok).toBe(true);
   });
 
-  it("accepts a proposal whose roles have an empty workspace", () => {
-    const shared = { ...proposal, roles: [{ ...proposal.roles[0], workspace: "" }] };
-    expect(extractProposal(JSON.stringify(shared))).toMatchObject({ ok: true, team: { roles: [{ workspace: "" }] } });
+  it("drops role workspaces the planner gave anyway, even the same one twice, and keeps the orchestrator's", () => {
+    const named = { ...proposal, roles: [{ ...proposal.roles[0], workspace: "qa" }, { ...proposal.roles[0], name: "qa", workspace: "qa" }] };
+    const result = extractProposal(JSON.stringify(named));
+    expect(result).toMatchObject({ ok: true, team: { orchestrator: { workspace: "orchestrator" } } });
+    if (result.ok) for (const role of result.team.roles) expect(role).not.toHaveProperty("workspace");
   });
 
   it("fails clearly when there is no answer", () => {

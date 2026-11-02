@@ -1,4 +1,4 @@
-import { isSharedRole, type Team } from "./team";
+import type { Team } from "./team";
 
 /** The part of a Paseo workspace descriptor that matching needs. */
 export interface WorkspaceRef {
@@ -8,7 +8,7 @@ export interface WorkspaceRef {
 }
 
 export interface WorkspaceStep {
-  /** "orchestrator" or the role name. */
+  /** "orchestrator". */
   target: string;
   /** The workspace title from the team definition. */
   workspace: string;
@@ -23,12 +23,11 @@ export function workspaceLabel(workspace: WorkspaceRef): string {
 
 const key = (label: string) => label.trim().toLowerCase();
 
-/** Matches each team workspace to an existing one of the project by title, or marks it for creation; shared roles get none. */
+/** Matches the team's workspace by title, or marks it for creation. */
 export function planWorkspaces(team: Team, existing: readonly WorkspaceRef[]): WorkspaceStep[] {
   const find = (title: string) => existing.find((workspace) => key(workspaceLabel(workspace)) === key(title))?.id ?? null;
   return [
     { target: "orchestrator", workspace: team.orchestrator.workspace, existingId: find(team.orchestrator.workspace) },
-    ...team.roles.filter((role) => !isSharedRole(role)).map((role) => ({ target: role.name, workspace: role.workspace, existingId: find(role.workspace) })),
   ];
 }
 
@@ -39,10 +38,7 @@ export interface AppliedWorkspace {
   created: boolean;
 }
 
-/**
- * Creates the missing workspaces last step first: Paseo's sidebar puts a workspace it hasn't seen yet on top,
- * so the orchestrator's ends up above the roles. Returns them in step order, orchestrator first.
- */
+/** Creates missing workspaces and returns them in step order. */
 export async function ensureWorkspaces(steps: readonly WorkspaceStep[], create: (title: string) => Promise<string>): Promise<AppliedWorkspace[]> {
   const ids: string[] = [];
   for (let at = steps.length - 1; at >= 0; at -= 1) ids[at] = steps[at]!.existingId ?? (await create(steps[at]!.workspace));
@@ -58,14 +54,8 @@ export function freeWorkspace(base: string, taken: readonly string[]): string {
   return `${base}-${index}`;
 }
 
-/**
- * A new draft whose orchestrator (unless fixed) and own role workspaces don't reuse any of the project's
- * workspace titles or each other, so applying it creates new workspaces. Shared roles stay shared.
- */
+/** A new draft whose workspace is free unless the orchestrator is fixed. */
 export function withFreeWorkspaces(team: Team, titles: readonly string[], { orchestrator }: { orchestrator: boolean }): Team {
-  const taken = [...titles];
-  const take = (title: string) => (taken.push(title), title);
-  const workspace = orchestrator ? take(freeWorkspace(team.orchestrator.workspace, taken)) : take(team.orchestrator.workspace);
-  const roles = team.roles.map((role) => (isSharedRole(role) ? role : { ...role, workspace: take(freeWorkspace(role.workspace, taken)) }));
-  return { ...team, orchestrator: { ...team.orchestrator, workspace }, roles };
+  const workspace = orchestrator ? freeWorkspace(team.orchestrator.workspace, titles) : team.orchestrator.workspace;
+  return { ...team, orchestrator: { ...team.orchestrator, workspace } };
 }

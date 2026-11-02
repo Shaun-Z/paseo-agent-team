@@ -41,15 +41,15 @@ describe("uniqueName", () => {
 
 describe("newRole", () => {
   it("uses the first ready provider and its first model, with a name not already taken", () => {
-    expect(newRole(catalog, ["role"])).toEqual({ name: expect.stringMatching(/^role#[0-9A-F]{4}$/), workspace: "", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" });
+    expect(newRole(catalog, ["role"])).toEqual({ name: expect.stringMatching(/^role#[0-9A-F]{4}$/), provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" });
   });
 
   it("leaves provider and model empty when nothing is ready", () => {
     expect(newRole([], [])).toMatchObject({ name: "role", provider: "", model: "" });
   });
 
-  it("leaves the workspace empty so the role shares the orchestrator's", () => {
-    expect(newRole(catalog, []).workspace).toBe("");
-    expect(newRole([], []).workspace).toBe("");
+  it("has no workspace: the role runs in the orchestrator's", () => {
+    expect(newRole(catalog, [])).not.toHaveProperty("workspace");
+    expect(newRole([], [])).not.toHaveProperty("workspace");
   });
 });

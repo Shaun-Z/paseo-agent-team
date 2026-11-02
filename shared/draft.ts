@@ -23,5 +23,5 @@ export function uniqueName(base: string, taken: readonly string[]): string {
 /** A blank role on the first ready provider, with a unique name, sharing the orchestrator's workspace. */
 export function newRole(catalog: readonly ProviderInfo[], takenNames: readonly string[]): Role {
   const provider = catalog.find((entry) => entry.ready);
-  return { name: uniqueName("role", takenNames), workspace: "", provider: provider?.id ?? "", model: provider?.models[0]?.id ?? "", folders: [], instructions: "" };
+  return { name: uniqueName("role", takenNames), provider: provider?.id ?? "", model: provider?.models[0]?.id ?? "", folders: [], instructions: "" };
 }

@@ -46,7 +46,7 @@ export interface AgentNode {
   children: AgentNode[];
 }
 
-/** A team's roles, with the workspaces their sessions run in (null when the workspace doesn't exist yet). */
+/** A team's roles; each workspaceId is the orchestrator's (null when it doesn't exist yet). */
 export interface RosterTeam {
   orchestratorWorkspaceId: string | null;
   roles: { name: string; provider: string; model: string; workspaceId: string | null }[];
@@ -104,7 +104,7 @@ export function agentNode(agent: DashboardAgent, children: AgentNode[] = [], def
 }
 
 function waitingNode(orchestrator: DashboardAgent, role: RosterTeam["roles"][number]): AgentNode {
-  const stand = { id: `waiting:${orchestrator.id}:${role.name}`, workspaceId: role.workspaceId, provider: role.provider, model: role.model, title: role.name, status: "waiting", labels: { role: role.name }, createdAt: "" };
+  const stand = { id: `waiting:${orchestrator.id}:${role.name}`, workspaceId: orchestrator.workspaceId, provider: role.provider, model: role.model, title: role.name, status: "waiting", labels: { role: role.name }, createdAt: "" };
   return { ...agentNode(stand), waiting: true };
 }
 
@@ -121,7 +121,7 @@ function waitingRoles(scope: readonly DashboardAgent[], roster: readonly RosterT
   for (const team of roster) {
     const lead = leadOf(scope, team);
     if (!lead) continue;
-    const taken = (role: RosterTeam["roles"][number]) => scope.some((agent) => agent.labels.role === role.name && role.workspaceId !== null && agent.workspaceId === role.workspaceId);
+    const taken = (role: RosterTeam["roles"][number]) => scope.some((agent) => agent.labels.role === role.name && team.orchestratorWorkspaceId !== null && agent.workspaceId === team.orchestratorWorkspaceId);
     const nodes = team.roles.filter((role) => !taken(role)).map((role) => waitingNode(lead, role));
     if (nodes.length) result.set(lead.id, nodes);
   }
@@ -150,7 +150,7 @@ export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds
   // A role session in a team's workspace whose parent is not shown (say, a cleared orchestrator) goes to the team's current orchestrator.
   const leads = (options.roster ?? []).flatMap((team) => {
     const lead = leadOf(scope, team);
-    return lead ? [{ lead, workspaces: new Set([team.orchestratorWorkspaceId, ...team.roles.map((role) => role.workspaceId)]) }] : [];
+    return lead ? [{ lead, workspaces: new Set([team.orchestratorWorkspaceId]) }] : [];
   });
   const adopter = (agent: DashboardAgent) => (agent.labels.role && parentOf(agent) !== undefined ? leads.find((team) => team.workspaces.has(agent.workspaceId ?? "")) : undefined)?.lead;
   const children = new Map<string, DashboardAgent[]>();

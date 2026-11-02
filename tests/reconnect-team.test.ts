@@ -7,11 +7,11 @@ import { teamReconnectRpc } from "../shared/rpc";
 import { parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
 import { TEAMS_DIR } from "../shared/team-files";
 
-const team = (workspace: string, roleWorkspace = ""): Team => ({
+const team = (workspace: string): Team => ({
   version: 1,
   goal: "Ship it",
   orchestrator: { workspace, provider: "claude", model: "m" },
-  roles: [{ name: "qa", workspace: roleWorkspace, provider: "codex", model: "n", folders: ["tests"], instructions: "Test it." }],
+  roles: [{ name: "qa", provider: "codex", model: "n", folders: ["tests"], instructions: "Test it." }],
 });
 
 const workspace = (id: string, title: string, archivingAt: string | null = null, projectId = "prj_1") => ({ id, projectId, archivingAt, name: id, title, workspaceKind: "directory" });
@@ -25,8 +25,8 @@ describe("reconnectTeam", () => {
     root = mkdtempSync(join(tmpdir(), "reconnect-team-"));
     mkdirSync(join(root, TEAMS_DIR), { recursive: true });
     writeFileSync(join(root, TEAM_FILE), serializeTeam(team("orchestrator")), "utf8");
-    writeFileSync(join(root, teamFile), serializeTeam(team("orchestrator", "design")), "utf8");
-    writeFileSync(join(root, otherFile), serializeTeam(team("side", "sound")), "utf8");
+    writeFileSync(join(root, teamFile), serializeTeam(team("orchestrator")), "utf8");
+    writeFileSync(join(root, otherFile), serializeTeam(team("side")), "utf8");
   });
 
   afterEach(() => {
@@ -46,7 +46,6 @@ describe("reconnectTeam", () => {
             workspace("wks_going", "Going", "2026-10-31T00:00:00Z"),
             workspace("wks_foreign", "Foreign", null, "prj_2"),
             workspace("wks_side", "Side"),
-            workspace("wks_design", "Design"),
           ],
         }),
       },
@@ -60,9 +59,9 @@ describe("reconnectTeam", () => {
   it("points the file and an old team.json for the same orchestrator workspace at the new title, changing nothing else", async () => {
     const result = await reconnectTeam({ projectId: "prj_1", file: teamFile, workspaceId: "wks_renamed" }, context());
     expect(result).toEqual({ ok: true, files: [TEAM_FILE, teamFile] });
-    expect(parseTeam(read(teamFile))).toEqual({ ok: true, team: team("Lead", "design") });
+    expect(parseTeam(read(teamFile))).toEqual({ ok: true, team: team("Lead") });
     expect(parseTeam(read(TEAM_FILE))).toEqual({ ok: true, team: team("Lead") });
-    expect(read(otherFile)).toBe(serializeTeam(team("side", "sound")));
+    expect(read(otherFile)).toBe(serializeTeam(team("side")));
   });
 
   it("throws for a file that is not one of the project's team files", async () => {
@@ -84,13 +83,6 @@ describe("reconnectTeam", () => {
     const check = unchanged();
     const result = await reconnectTeam({ projectId: "prj_1", file: teamFile, workspaceId: "wks_side" }, context());
     expect(result).toEqual({ ok: false, errors: [expect.stringContaining("belongs to another team")] });
-    check();
-  });
-
-  it("returns ok: false and keeps the files when one of the team's own role workspaces uses the title", async () => {
-    const check = unchanged();
-    const result = await reconnectTeam({ projectId: "prj_1", file: teamFile, workspaceId: "wks_design" }, context());
-    expect(result).toEqual({ ok: false, errors: [expect.stringContaining("used by this team's role")] });
     check();
   });
 });

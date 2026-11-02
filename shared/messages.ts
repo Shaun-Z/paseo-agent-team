@@ -40,7 +40,6 @@ export const en = {
     restartConfirmBody: "The orchestrator is archived and a new one starts with the same team. Role sessions are kept.",
     restartConfirm: "Reset",
     restarting: "Starting a new orchestrator…",
-    roleOf: "This workspace belongs to the {{role}} role of the team in {{team}}. Edit that team from its workspace.",
   },
   create: {
     intro: "Create a team: describe the goal and a planner agent proposes a provider and model for each role.",
@@ -65,10 +64,13 @@ export const en = {
   role: {
     name: "Role name",
     workspace: "Workspace name",
-    sharedWorkspace: "Shared with orchestrator",
     remove: "Remove",
     folders: "Folders (comma-separated, empty for no limit)",
     instructions: "Instructions",
+  },
+  progress: {
+    title: "Please wait",
+    keepOpen: "Please keep this screen open until it finishes. This can take a minute or two.",
   },
   result: {
     applying: "Applying… (save file → create workspaces → start orchestrator)",
@@ -123,7 +125,6 @@ export const ko: Shape<typeof en> = {
     restartConfirmBody: "오케스트레이터를 보관하고 같은 팀으로 새 오케스트레이터를 시작합니다. 역할 세션은 유지됩니다.",
     restartConfirm: "리셋",
     restarting: "새 오케스트레이터를 시작하는 중…",
-    roleOf: "이 워크스페이스는 {{team}} 팀의 {{role}} 역할 워크스페이스입니다. 팀은 그 워크스페이스에서 편집하세요.",
   },
   create: {
     intro: "팀 만들기: 목표를 적으면 계획 에이전트가 역할별 provider/모델을 제안합니다.",
@@ -148,10 +149,13 @@ export const ko: Shape<typeof en> = {
   role: {
     name: "역할 이름",
     workspace: "workspace 이름",
-    sharedWorkspace: "오케스트레이터와 공유",
     remove: "삭제",
     folders: "담당 폴더 (쉼표로 구분, 비우면 제한 없음)",
     instructions: "지시",
+  },
+  progress: {
+    title: "잠시 기다려 주세요",
+    keepOpen: "끝날 때까지 이 화면을 닫지 말고 기다려 주세요. 1~2분 걸릴 수 있습니다.",
   },
   result: {
     applying: "적용 중… (파일 저장 → workspace 생성 → 오케스트레이터 시작)",

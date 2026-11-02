@@ -57,7 +57,7 @@ const team = (workspace: string): Team => ({
   version: 1,
   goal: "",
   orchestrator: { workspace, provider: "claude", model: "m" },
-  roles: [{ name: "qa", workspace: "", provider: "claude", model: "m", folders: [], instructions: "" }],
+  roles: [{ name: "qa", provider: "claude", model: "m", folders: [], instructions: "" }],
 });
 
 describe("sameTeamFiles", () => {
@@ -151,6 +151,64 @@ describe("deleteTeam", () => {
       fileFailures: [expect.stringMatching(/^file \.agents\/team\.json: /)],
     });
     expect(existsSync(join(root, teamFile))).toBe(false);
+  });
+});
+
+describe("deleteTeam with a legacy team file", () => {
+  const teamFile = `${TEAMS_DIR}/lead.json`;
+  const sideFile = `${TEAMS_DIR}/side.json`;
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "delete-legacy-team-"));
+    mkdirSync(join(root, TEAMS_DIR), { recursive: true });
+    const withRoleWorkspace = (workspace: string, roleWorkspace: string) => JSON.stringify({ ...JSON.parse(serializeTeam(team(workspace))), roles: [{ name: "qa", workspace: roleWorkspace, provider: "claude", model: "m" }] });
+    writeFileSync(join(root, teamFile), withRoleWorkspace("lead", "design"), "utf8");
+    // The other team's legacy role workspace is "extra", which the first team must leave alone.
+    writeFileSync(join(root, sideFile), withRoleWorkspace("side", "extra"), "utf8");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const archived: string[] = [];
+  const context = () => {
+    archived.length = 0;
+    const workspace = (id: string, title: string) => ({ id, projectId: "prj_1", archivingAt: null, name: id, title, workspaceKind: "directory" });
+    return {
+      paseo: {
+        projects: { list: async () => ({ projects: [{ projectId: "prj_1", projectCustomName: null, projectDisplayName: "Demo", projectRootPath: root }] }) },
+        workspaces: { list: async () => ({ entries: [workspace("wks_lead", "lead"), workspace("wks_design", "design"), workspace("wks_side", "side"), workspace("wks_extra", "extra")] }) },
+        agents: {
+          list: async () => ({
+            entries: [
+              { agent: agent("orch", "wks_lead", { [LABEL]: "orchestrator" }) },
+              { agent: agent("legacy-qa", "wks_design", { role: "qa" }) },
+              { agent: agent("other-role", "wks_design", { role: "sound" }) },
+              { agent: agent("side-qa", "wks_extra", { role: "qa" }) },
+              { agent: agent("side-orch", "wks_side", { [LABEL]: "orchestrator" }) },
+            ],
+          }),
+          ref: (id: string) => ({ archive: async () => archived.push(id) }),
+        },
+      } as never,
+    };
+  };
+
+  it("archives the team's role agents in its legacy role workspaces too, and leaves the other team's", async () => {
+    const result = await deleteTeam({ projectId: "prj_1", file: teamFile }, context());
+    expect(result).toEqual({ files: [teamFile], archived: 2, failures: [], fileFailures: [] });
+    expect(archived.sort()).toEqual(["legacy-qa", "orch"]);
+    expect(existsSync(join(root, teamFile))).toBe(false);
+    expect(existsSync(join(root, sideFile))).toBe(true);
+  });
+
+  it("archives no agent in a legacy workspace once the file was rewritten without it", async () => {
+    writeFileSync(join(root, teamFile), serializeTeam(team("lead")), "utf8");
+    const result = await deleteTeam({ projectId: "prj_1", file: teamFile }, context());
+    expect(result).toEqual({ files: [teamFile], archived: 1, failures: [], fileFailures: [] });
+    expect(archived).toEqual(["orch"]);
   });
 });
 

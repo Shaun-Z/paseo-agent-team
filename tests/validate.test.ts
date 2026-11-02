@@ -37,8 +37,8 @@ const team: Team = {
   goal: "",
   orchestrator: { workspace: "orchestrator", provider: "claude", model: "claude-opus-5-5" },
   roles: [
-    { name: "design", workspace: "design", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" },
-    { name: "sound", workspace: "sound", provider: "antigravity", model: "gemini-4-argon-high", folders: [], instructions: "" },
+    { name: "design", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" },
+    { name: "sound", provider: "antigravity", model: "gemini-4-argon-high", folders: [], instructions: "" },
   ],
 };
 

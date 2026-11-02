@@ -53,7 +53,7 @@ export const teamReconnectRpc = defineRpc({
   ]),
 });
 
-/** For the agent dashboard: the teams of a workspace's project, with their roles' workspaces resolved to ids. */
+/** For the agent dashboard: the teams of a workspace's project, with their team workspace resolved to an id. */
 export const teamRosterRpc = defineRpc({
   name: "team.roster",
   input: z.object({ workspaceId: z.string() }),
@@ -61,7 +61,7 @@ export const teamRosterRpc = defineRpc({
     teams: z.array(z.object({
       /** Null when the orchestrator's workspace doesn't exist. */
       orchestratorWorkspaceId: z.string().nullable(),
-      /** A shared role's workspace is the orchestrator's; null when the role's own workspace doesn't exist yet. */
+      /** Every role uses the orchestrator workspace id. */
       roles: z.array(z.object({ name: z.string(), provider: z.string(), model: z.string(), workspaceId: z.string().nullable() })),
     })),
     /** Problems reading or parsing the project's team files. */
@@ -80,8 +80,6 @@ export const teamReadRpc = defineRpc({
     /** The project-relative file of the team that runs in the workspace, or null when it has none. */
     file: z.string().nullable(),
     team: TeamSchema.nullable(),
-    /** When the workspace has no team: the team (by its orchestrator's workspace) and role that use it as the role's own. */
-    owner: z.object({ team: z.string(), role: z.string() }).nullable(),
     /** Workspace titles the project's other teams use; a team can't use them too. */
     takenWorkspaces: z.array(z.string()),
     /** Titles of the project's workspaces; a new draft gets workspace names that aren't among them. */
@@ -128,7 +126,7 @@ export const teamProposalCancelRpc = defineRpc({
 
 const TeamOutlineSchema = z.object({
   orchestratorWorkspace: z.string(),
-  roles: z.array(z.object({ name: z.string(), workspace: z.string(), folders: z.array(z.string()) })),
+  roles: z.array(z.object({ name: z.string(), folders: z.array(z.string()) })),
 });
 
 /** Starts a planner agent that proposes one more role for the team being edited. */

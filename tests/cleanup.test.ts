@@ -6,7 +6,7 @@ const team: Team = {
   version: 1,
   goal: "",
   orchestrator: { workspace: "orchestrator", provider: "claude", model: "claude-opus-5-5" },
-  roles: [{ name: "design", workspace: "design", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" }],
+  roles: [{ name: "design", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" }],
 };
 
 const workspace = (id: string, title: string) => ({ id, name: id, title });
@@ -32,7 +32,7 @@ describe("plannerCleanup", () => {
   });
 
   it("keeps a Team planner workspace the team uses", () => {
-    const uses = { ...team, roles: [{ ...team.roles[0]!, workspace: "Team planner" }] };
+    const uses = { ...team, orchestrator: { ...team.orchestrator, workspace: "Team planner" } };
     expect(plannerCleanup([workspace("wks_plan", "Team planner")], [agent("a1", "wks_plan", "planner")], uses)).toEqual({ agents: ["a1"], workspaces: [] });
   });
 

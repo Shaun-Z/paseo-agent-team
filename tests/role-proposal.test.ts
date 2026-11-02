@@ -12,12 +12,12 @@ const catalog: ProviderInfo[] = [
 const outline: TeamOutline = {
   orchestratorWorkspace: "orchestrator",
   roles: [
-    { name: "frontend", workspace: "frontend", folders: ["apps/web"] },
-    { name: "backend", workspace: "backend", folders: [] },
+    { name: "frontend", folders: ["apps/web"] },
+    { name: "backend", folders: [] },
   ],
 };
 
-const role = { name: "qa", workspace: "qa", provider: "claude", model: "claude-sonnet-5-5", folders: ["tests/e2e"], instructions: "Writes end-to-end tests." };
+const role = { name: "qa", provider: "claude", model: "claude-sonnet-5-5", folders: ["tests/e2e"], instructions: "Writes end-to-end tests." };
 
 describe("rolePrompt", () => {
   const prompt = rolePrompt("someone who writes end-to-end tests", outline, catalog);
@@ -30,45 +30,34 @@ describe("rolePrompt", () => {
   });
 
   it("lists the existing roles and the orchestrator workspace so the new role does not overlap them", () => {
-    expect(prompt).toContain("- frontend (workspace frontend, folders apps/web)");
-    expect(prompt).toContain("- backend (workspace backend, folders any)");
+    expect(prompt).toContain("- frontend (folders apps/web)");
+    expect(prompt).toContain("- backend (folders any)");
     expect(prompt).toContain('"orchestrator"');
   });
 
-  it("shows an empty workspace in the example and explains when to use a separate one", () => {
+  it("says the role runs in the orchestrator's workspace and offers no workspace of its own", () => {
     const example = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1));
-    expect(example.workspace).toBe("");
-    expect(prompt).toMatch(/empty string/);
+    expect(example).not.toHaveProperty("workspace");
     expect(prompt).toMatch(/orchestrator's workspace/);
-    expect(prompt).toMatch(/separate/);
+    expect(prompt).not.toMatch(/separate/);
+    expect(prompt).not.toMatch(/empty string/);
+    expect(prompt).not.toMatch(/its own Paseo workspace/);
   });
 
   it("forbids file changes and shows the exact JSON shape of one role", () => {
     expect(prompt).toMatch(/Do not create, change or delete any file/);
     const example = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1));
-    expect(Object.keys(example).sort()).toEqual(["folders", "instructions", "model", "name", "provider", "workspace"]);
+    expect(Object.keys(example).sort()).toEqual(["folders", "instructions", "model", "name", "provider"]);
   });
 });
 
 describe("ROLE_JSON_SCHEMA", () => {
   it("requires every role field", () => {
-    expect(ROLE_JSON_SCHEMA.required).toEqual(["name", "workspace", "provider", "model", "folders", "instructions"]);
+    expect(ROLE_JSON_SCHEMA.required).toEqual(["name", "provider", "model", "folders", "instructions"]);
   });
 
-  it("allows an empty workspace string", () => {
-    expect(ROLE_JSON_SCHEMA.properties.workspace).toEqual({ type: "string" });
-  });
-});
-
-describe("extractRole with a shared role", () => {
-  it("accepts an empty workspace", () => {
-    const shared = { ...role, workspace: "" };
-    expect(extractRole(JSON.stringify(shared))).toEqual({ ok: true, role: shared });
-  });
-
-  it("defaults a missing workspace to an empty string", () => {
-    const { workspace: _omit, ...withoutWorkspace } = role;
-    expect(extractRole(JSON.stringify(withoutWorkspace))).toEqual({ ok: true, role: { ...role, workspace: "" } });
+  it("has no workspace property", () => {
+    expect(ROLE_JSON_SCHEMA.properties).not.toHaveProperty("workspace");
   });
 });
 
@@ -76,6 +65,10 @@ describe("extractRole", () => {
   it("reads a role from plain JSON or JSON wrapped in a code fence and text", () => {
     expect(extractRole(JSON.stringify(role))).toEqual({ ok: true, role });
     expect(extractRole("Here it is:\n```json\n" + JSON.stringify(role) + "\n```")).toEqual({ ok: true, role });
+  });
+
+  it("drops a workspace the planner gave anyway", () => {
+    expect(extractRole(JSON.stringify({ ...role, workspace: "qa" }))).toEqual({ ok: true, role });
   });
 
   it("reports a missing answer, missing JSON, broken JSON and a missing field", () => {

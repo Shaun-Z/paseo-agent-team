@@ -9,8 +9,8 @@ import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
 import type { teamApplyRpc, teamDeleteRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "../shared/rpc";
-import { checkTeam, isSharedRole, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
-import { roleOwnerOf, sameTeamFiles, teamFileFor, teamIn, teamWorkspaces, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
+import { checkTeam, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
+import { legacyWorkspacesOf, sameTeamFiles, teamFileFor, teamFileWorkspaces, teamIn, workspaceOwnerOf, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
 import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
 
 
@@ -83,7 +83,7 @@ export async function deleteTeam({ projectId, file }: RpcInput<typeof teamDelete
   const own = sameTeamFiles(teams, file);
   if (!own.length) throw new Error(`${file} is not a team file of ${project.name}.`);
   const idOf = (title: string) => teamWorkspaceId(entries, project.id, title);
-  const workspaceIds = own.flatMap(({ team }) => teamWorkspaces(team)).map(idOf).filter((id): id is string => id !== null);
+  const workspaceIds = own.flatMap(teamFileWorkspaces).map(idOf).filter((id): id is string => id !== null);
   const keep = workspacesOfOtherTeams(teams, own[0]!.team.orchestrator.workspace).map(idOf).filter((id): id is string => id !== null);
   const agents = agentEntries.map((entry) => entry.agent);
   const ids = teamAgentsToArchive(agents, workspaceIds.filter((id) => !keep.includes(id)), own.flatMap(({ team }) => team.roles.map((role) => role.name)));
@@ -114,7 +114,6 @@ export async function reconnectTeam({ projectId, file, workspaceId }: RpcInput<t
   const key = (value: string) => value.trim().toLowerCase();
   const taken = workspacesOfOtherTeams(teams, own[0]!.team.orchestrator.workspace);
   if (taken.some((name) => key(name) === key(title))) return { ok: false, errors: [`Workspace "${title}" belongs to another team.`] };
-  if (own.some(({ team }) => team.roles.some((role) => !isSharedRole(role) && key(role.workspace) === key(title)))) return { ok: false, errors: [`Workspace "${title}" is used by this team's role.`] };
   for (const { file, team } of own) await writeFile(join(project.root, file), serializeTeam({ ...team, orchestrator: { ...team.orchestrator, workspace: title } }), "utf8");
   return { ok: true, files: own.map((entry) => entry.file) };
 }
@@ -128,7 +127,7 @@ export async function teamRoster({ workspaceId }: RpcInput<typeof teamRosterRpc>
       const orchestratorWorkspaceId = idOf(team.orchestrator.workspace);
       return {
         orchestratorWorkspaceId,
-        roles: team.roles.map((role) => ({ name: role.name, provider: role.provider, model: role.model, workspaceId: isSharedRole(role) ? orchestratorWorkspaceId : idOf(role.workspace) })),
+        roles: team.roles.map((role) => ({ name: role.name, provider: role.provider, model: role.model, workspaceId: orchestratorWorkspaceId })),
       };
     }),
     errors,
@@ -151,8 +150,9 @@ async function projectTeams(project: ProjectRef): Promise<{ teams: TeamFile[]; n
   const teams: TeamFile[] = [];
   const errors: string[] = [];
   for (const file of names) {
-    const parsed = parseTeam(await readFile(join(project.root, file), "utf8"));
-    if (parsed.ok) teams.push({ file, team: parsed.team });
+    const text = await readFile(join(project.root, file), "utf8");
+    const parsed = parseTeam(text);
+    if (parsed.ok) teams.push({ file, team: parsed.team, legacyWorkspaces: legacyWorkspacesOf(JSON.parse(text)) });
     else errors.push(...parsed.errors.map((error) => `${file}: ${error}`));
   }
   return { teams, names, errors };
@@ -169,14 +169,13 @@ export async function readTeam(target: RpcInput<typeof teamReadRpc>, { paseo }: 
   const catalog = catalogFrom(await providerEntries(paseo));
   const [{ teams, errors }, { entries }] = await Promise.all([projectTeams(project), paseo.workspaces.list()]);
   const workspace = "workspaceId" in target ? await workspaceTitle(paseo, target.workspaceId) : null;
-  const own = workspace === null ? undefined : teamIn(teams, workspace);
+  const own = workspace === null ? undefined : workspaceOwnerOf(teams, workspace);
   return {
     project,
     workspace,
     file: own?.file ?? null,
     team: own?.team ?? null,
-    owner: workspace === null || own ? null : (roleOwnerOf(teams, workspace) ?? null),
-    takenWorkspaces: workspacesOfOtherTeams(teams, workspace ?? ""),
+    takenWorkspaces: workspacesOfOtherTeams(teams, own?.team.orchestrator.workspace ?? workspace ?? ""),
     projectWorkspaces: entries.filter((entry) => entry.projectId === project.id && !entry.archivingAt).map(workspaceLabel),
     errors,
     validation: own ? validateTeam(own.team, catalog) : [],

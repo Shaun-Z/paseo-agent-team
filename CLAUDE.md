@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-A Paseo plugin (`paseo-plugin.json`, id `paseo-agent-team`) that turns a Paseo project into an agent team: each role gets its own workspace and provider/model, and an orchestrator agent delegates to them. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the older single `.agents/team.json` is still read), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
+A Paseo plugin (`paseo-plugin.json`, id `paseo-agent-team`) that turns a Paseo project into an agent team: each role gets its own provider/model, every role runs in the orchestrator's workspace (one workspace per team), and the orchestrator agent delegates to them. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the older single `.agents/team.json` is still read), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
 
 ## Commands
 
@@ -29,11 +29,11 @@ Paseo plugins have two runtimes, each with one entry that default-exports a `con
 - `index.client.tsx` + `client/` run inside the Paseo app (React Native, all platforms). It registers a workspace panel (`TeamPanel`), an always-visible sidebar item and screen that lists every project's teams and creates new ones (`TeamScreen`), and a Command Center item.
 - `shared/` is compiled into both and must stay pure (Zod contracts and plain values, no Node or React Native APIs). It holds the team schema (`team.ts`), RPC contracts (`rpc.ts`), provider/model validation (`validate.ts`), the planner and orchestrator prompts (`proposal.ts`, `prompt.ts`), workspace matching (`apply-plan.ts`), planner cleanup (`cleanup.ts`) and UI strings (`messages.ts`, English and Korean). Most logic lives here so it can be unit-tested without a daemon.
 
-The user-facing flow is propose → review → apply. Propose starts a planner agent with `outputSchema: TEAM_JSON_SCHEMA`. The client then polls `teamProposal`, which calls `waitForFinish(1000)` and parses the planner's last message. Apply re-validates, refuses workspaces another team of the project uses, writes the team's own file, reuses or creates workspaces matched by title, and then either tells a running orchestrator on the same provider/model to re-read the team or starts a new one. Finally it archives planner agents and an emptied `Team planner` workspace.
+The user-facing flow is propose → review → apply. Propose starts a planner agent with `outputSchema: TEAM_JSON_SCHEMA`. The client then polls `teamProposal`, which calls `waitForFinish(1000)` and parses the planner's last message. Apply re-validates, refuses workspaces another team of the project uses, writes the team's own file, reuses or creates the orchestrator's workspace matched by title, and then either tells a running orchestrator on the same provider/model to re-read the team or starts a new one. Finally it archives planner agents and an emptied `Team planner` workspace.
 
 ```
 propose → planner agent → poll teamProposal → user edits draft → apply
-apply: validate → check other teams' workspaces → write the team's file → match/create workspaces → reuse or start orchestrator → archive planners
+apply: validate → check other teams' workspaces → write the team's file → match/create the orchestrator's workspace → reuse or start orchestrator → archive planners
 ```
 
 Role agents are not created by the plugin. The orchestrator starts them through Paseo tools or `paseo run`, following the instructions rendered by `orchestratorPrompt`. Behaviour for role agents can only be shaped through that prompt.

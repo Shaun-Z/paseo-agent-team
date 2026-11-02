@@ -429,7 +429,7 @@ describe("buildAgentForest with a roster", () => {
     orchestratorWorkspaceId: "wks_a",
     roles: [
       { name: "builder", provider: "codex", model: "gpt-6.1-sol", workspaceId: "wks_a" },
-      { name: "tester", provider: "antigravity", model: "gemini-4-argon-medium", workspaceId: "wks_b" },
+      { name: "tester", provider: "antigravity", model: "gemini-4-argon-medium", workspaceId: "wks_a" },
     ],
   }];
   const waiting = (node: AgentNode) => node.children.filter((kid) => kid.waiting).map((kid) => kid.role);
@@ -448,13 +448,13 @@ describe("buildAgentForest with a roster", () => {
     expect(forest.solo).toEqual([]);
   });
 
-  it("hides a role's waiting node when a shown agent in the role's workspace has its label, whoever started it", () => {
-    const forest = buildAgentForest([orchestrator("o"), agent("t", { workspaceId: "wks_b", labels: { role: "tester" } })], ["wks_a", "wks_b"], { ...hide, roster });
+  it("hides a role's waiting node when a shown agent in the team's workspace has its label, whoever started it", () => {
+    const forest = buildAgentForest([orchestrator("o"), agent("t", { workspaceId: "wks_a", labels: { role: "tester" } })], ["wks_a", "wks_b"], { ...hide, roster });
     expect(waiting(forest.trees[0]!)).toEqual(["builder"]);
   });
 
   it("ignores a role session in another workspace", () => {
-    const forest = buildAgentForest([orchestrator("o"), agent("t", { workspaceId: "wks_a", labels: { role: "tester" } })], ["wks_a", "wks_b"], { ...hide, roster });
+    const forest = buildAgentForest([orchestrator("o"), agent("t", { workspaceId: "wks_b", labels: { role: "tester" } })], ["wks_a", "wks_b"], { ...hide, roster });
     expect(waiting(forest.trees[0]!)).toEqual(["builder", "tester"]);
   });
 
@@ -476,11 +476,6 @@ describe("buildAgentForest with a roster", () => {
     expect(ids(forest.solo)).toEqual(["plain"]);
   });
 
-  it("treats a role whose own workspace doesn't exist yet as waiting", () => {
-    const forest = buildAgentForest([orchestrator("o")], ["wks_a"], { ...hide, roster: [{ orchestratorWorkspaceId: "wks_a", roles: [{ name: "docs", provider: "claude", model: "claude-sonnet-5-5", workspaceId: null }] }] });
-    expect(waiting(forest.trees[0]!)).toEqual(["docs"]);
-  });
-
   describe("role sessions whose parent is not shown", () => {
     const role = (id: string, over: Partial<DashboardAgent> = {}) => agent(id, { ...over, labels: { role: "builder", ...over.labels } });
     const scope = ["wks_a", "wks_b"];
@@ -498,12 +493,6 @@ describe("buildAgentForest with a roster", () => {
       const forest = buildAgentForest(agents, scope, { ...hide, roster });
       expect(ids(forest.trees.find((tree) => tree.agent.id === "old")!.children)).toEqual(["b"]);
       expect(ids(forest.trees.find((tree) => tree.agent.id === "new")?.children.filter((kid) => !kid.waiting) ?? [])).toEqual([]);
-    });
-
-    it("moves a role session in another role workspace of the team", () => {
-      const agents = [orchestrator("o"), role("t", { workspaceId: "wks_b", labels: { role: "tester", [PARENT]: "gone" } })];
-      const forest = buildAgentForest(agents, scope, { ...hide, roster });
-      expect(ids(forest.trees[0]!.children.filter((kid) => !kid.waiting))).toEqual(["t"]);
     });
 
     it("keeps a session that has no parent at all", () => {

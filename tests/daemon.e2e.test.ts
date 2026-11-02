@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyTeam, cancelProposal, deleteTeam, pendingProposal, projectTeamsList, proposeRole, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE } from "../shared/permissions";
-import { isSharedRole, TeamSchema, type Team } from "../shared/team";
+import { TeamSchema, type Team } from "../shared/team";
 import { agentModeOf, validateTeam } from "../shared/validate";
 
 describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemon", () => {
@@ -86,7 +86,7 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
   }, 330_000);
 
   it("proposes one role from a description", async () => {
-    const team = { orchestratorWorkspace: proposed.orchestrator.workspace, roles: proposed.roles.map(({ name, workspace, folders }) => ({ name, workspace, folders })) };
+    const team = { orchestratorWorkspace: proposed.orchestrator.workspace, roles: proposed.roles.map(({ name, folders }) => ({ name, folders })) };
     const { agentId } = await proposeRole({ workspaceId, description: "Writes and runs end-to-end tests for the game", team }, { paseo });
     for (let attempt = 0; attempt < 150; attempt += 1) {
       const result = await roleProposal({ agentId }, { paseo });
@@ -125,8 +125,8 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     // A new team gets its own file, named after its orchestrator's workspace.
     expect(result.file.startsWith(join(root, ".agents/teams/"))).toBe(true);
     expect(JSON.parse(readFileSync(result.file, "utf8")).roles.length).toBe(proposed.roles.length);
-    // The planner leaves most roles without a workspace of their own, so only the others get one besides the orchestrator's.
-    expect(result.workspaces).toHaveLength(proposed.roles.filter((role) => !isSharedRole(role)).length + 1);
+    // Every role runs in the orchestrator's workspace, so it is the only one planned.
+    expect(result.workspaces.map((workspace) => workspace.target)).toEqual(["orchestrator"]);
 
     const { entries } = await paseo.workspaces.list();
     for (const workspace of result.workspaces) {
@@ -163,26 +163,16 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect((await projectTeamsList({}, { paseo })).find((project) => project.id === projectId)?.teams.map((team) => team.file)).toEqual([result.file]);
   }, 120_000);
 
-  it("applies a team with a role that shares the orchestrator's workspace", async () => {
+  it("applies a team with several roles using only the orchestrator's workspace", async () => {
     const template = proposed.roles[0]!;
-    const own = proposed.roles.filter((role) => !isSharedRole(role));
-    const team: Team = {
-      ...proposed,
-      roles: [...proposed.roles, { ...template, name: "shared-qa", workspace: "", folders: [], instructions: "" }, { ...template, name: "own-docs", workspace: "own-docs", folders: [], instructions: "" }],
-    };
+    const team: Team = { ...proposed, roles: [...proposed.roles, { ...template, name: "shared-qa", folders: [], instructions: "" }] };
     const result = await applyTeam({ projectId, team }, { paseo });
     if (!result.ok) throw new Error(result.errors.join("\n"));
 
-    // Steps exist for the orchestrator and every role with its own workspace, none for the shared role.
-    expect(result.workspaces.map((workspace) => workspace.target)).toEqual(["orchestrator", ...own.map((role) => role.name), "own-docs"]);
-    expect(result.workspaces.find((workspace) => workspace.target === "own-docs")?.created).toBe(true);
-
+    expect(result.workspaces.map((workspace) => workspace.target)).toEqual(["orchestrator"]);
     const titles = (await paseo.workspaces.list()).entries.filter((entry) => entry.projectId === projectId && !entry.archivingAt).map((entry) => workspaceLabel(entry).trim().toLowerCase());
     expect(titles).toContain(team.orchestrator.workspace.toLowerCase());
-    expect(titles).toContain("own-docs");
-    for (const role of own) expect(titles).toContain(role.workspace.toLowerCase());
     expect(titles).not.toContain("shared-qa");
-    expect(titles).not.toContain("");
   }, 120_000);
 
   it("runs a second team in another workspace, from its own file", async () => {
@@ -198,15 +188,15 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(before.workspace).toBe(title);
     expect(before.takenWorkspaces.map((workspace) => workspace.toLowerCase())).toContain(proposed.orchestrator.workspace.toLowerCase());
 
-    // A team whose role takes the first team's workspace is refused before anything is written.
+    // A team whose orchestrator takes the first team's workspace is refused before anything is written.
     const template = proposed.roles[0]!;
-    const clashing: Team = { ...proposed, orchestrator: { ...proposed.orchestrator, workspace: title }, roles: [{ ...template, name: "steal", workspace: proposed.orchestrator.workspace }] };
+    const clashing: Team = { ...proposed, orchestrator: { ...proposed.orchestrator, workspace: proposed.orchestrator.workspace }, roles: [{ ...template, name: "steal" }] };
     const refused = await applyTeam({ workspaceId: side, team: clashing }, { paseo });
     expect(refused.ok).toBe(false);
     expect(!refused.ok && refused.errors.join("\n")).toContain("belongs to another team");
 
     const workspacesBefore = (await projectWorkspaces()).length;
-    const second: Team = { ...proposed, goal: "Second team", orchestrator: { ...proposed.orchestrator, workspace: title }, roles: [{ ...template, workspace: "" }] };
+    const second: Team = { ...proposed, goal: "Second team", orchestrator: { ...proposed.orchestrator, workspace: title }, roles: [template] };
     const applied = await applyTeam({ workspaceId: side, team: second }, { paseo });
     if (!applied.ok) throw new Error(applied.errors.join("\n"));
     expect(applied.file).toBe(join(root, ".agents/teams", `${title}.json`));

@@ -1,4 +1,4 @@
-import { isSharedRole, type Team } from "./team";
+import type { Team } from "./team";
 import type { TeamError } from "./validate";
 
 /** Each workspace's team lives in its own file here, named after its orchestrator's workspace. */
@@ -8,9 +8,28 @@ export const TEAMS_DIR = ".agents/teams";
 export interface TeamFile {
   file: string;
   team: Team;
+  /** Old role workspace titles, reserved until the file is rewritten without them. */
+  legacyWorkspaces?: string[];
 }
 
 const key = (title: string) => title.trim().toLowerCase();
+
+/** Captures old role workspace titles before RoleSchema strips them. */
+export function legacyWorkspacesOf(value: unknown): string[] {
+  if (!value || typeof value !== "object" || !("roles" in value) || !Array.isArray(value.roles)) return [];
+  const titles = value.roles.flatMap((role: unknown) => role && typeof role === "object" && "workspace" in role && typeof role.workspace === "string" && role.workspace.trim() ? [role.workspace.trim()] : []);
+  return [...new Map(titles.map((title) => [key(title), title])).values()];
+}
+
+/** Workspaces reserved by a file, including old role workspaces until Apply rewrites it. */
+export function teamFileWorkspaces(entry: TeamFile): string[] {
+  return [...new Map([...teamWorkspaces(entry.team), ...(entry.legacyWorkspaces ?? [])].map((title) => [key(title), title])).values()];
+}
+
+/** The team reserving a workspace, including an old role workspace. */
+export function workspaceOwnerOf(files: readonly TeamFile[], workspace: string): TeamFile | undefined {
+  return teamIn(files, workspace) ?? files.find((entry) => teamFileWorkspaces(entry).some((title) => key(title) === key(workspace)));
+}
 
 /** The team whose orchestrator runs in the workspace with this title. */
 export function teamIn(files: readonly TeamFile[], workspace: string): TeamFile | undefined {
@@ -23,25 +42,16 @@ export function sameTeamFiles(files: readonly TeamFile[], file: string): TeamFil
   return own ? files.filter((entry) => key(entry.team.orchestrator.workspace) === key(own.team.orchestrator.workspace)) : [];
 }
 
-/** The team (by its orchestrator's workspace) and role that use this workspace as the role's own. */
-export function roleOwnerOf(files: readonly TeamFile[], workspace: string): { team: string; role: string } | undefined {
-  for (const { team } of files) {
-    const role = team.roles.find((candidate) => !isSharedRole(candidate) && key(candidate.workspace) === key(workspace));
-    if (role) return { team: team.orchestrator.workspace, role: role.name };
-  }
-  return undefined;
-}
-
-/** The team's orchestrator and own role workspaces. */
+/** The team's workspace. */
 export function teamWorkspaces(team: Team): string[] {
-  return [team.orchestrator.workspace, ...team.roles.filter((role) => !isSharedRole(role)).map((role) => role.workspace)];
+  return [team.orchestrator.workspace];
 }
 
-/** The orchestrator and own role workspaces of every team except the one that runs in `workspace`. */
+/** The workspace of every team except the one that runs in `workspace`. */
 export function workspacesOfOtherTeams(files: readonly TeamFile[], workspace: string): string[] {
   return files
     .filter((entry) => key(entry.team.orchestrator.workspace) !== key(workspace))
-    .flatMap(({ team }) => teamWorkspaces(team));
+    .flatMap(teamFileWorkspaces);
 }
 
 /** The team's workspaces that another team already uses; teams never share a workspace. */
@@ -50,7 +60,6 @@ export function workspaceClashes(team: Team, taken: readonly string[]): TeamErro
   const message = (workspace: string) => `workspace "${workspace}" belongs to another team`;
   return [
     ...(used.has(key(team.orchestrator.workspace)) ? [{ target: "orchestrator", message: message(team.orchestrator.workspace) }] : []),
-    ...team.roles.filter((role) => !isSharedRole(role) && used.has(key(role.workspace))).map((role) => ({ target: role.name, message: message(role.workspace) })),
   ];
 }
 
