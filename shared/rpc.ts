@@ -147,6 +147,28 @@ export const teamRoleProposalRpc = defineRpc({
   ]),
 });
 
+/** Starts a planner that improves instructions for a role in the current draft. */
+export const teamInstructionsImproveRpc = defineRpc({
+  name: "team.instructions.improve",
+  input: TargetSchema.and(z.object({
+    role: z.object({ name: z.string(), folders: z.array(z.string()), instructions: z.string() }),
+    request: z.string(),
+    team: TeamOutlineSchema.extend({ goal: z.string() }),
+  })),
+  output: z.object({ agentId: z.string() }),
+});
+
+/** The instructions planner's proposal once it has finished. */
+export const teamInstructionsProposalRpc = defineRpc({
+  name: "team.instructions.proposal",
+  input: z.object({ agentId: z.string() }),
+  output: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("running") }),
+    z.object({ status: z.literal("done"), instructions: z.string() }),
+    z.object({ status: z.literal("failed"), errors: z.array(z.string()) }),
+  ]),
+});
+
 const AppliedWorkspaceSchema = z.object({ target: z.string(), workspace: z.string(), id: z.string(), created: z.boolean() });
 
 /** Writes the team file, creates missing workspaces, starts the orchestrator and archives the planners. */

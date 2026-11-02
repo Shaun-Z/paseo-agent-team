@@ -3,6 +3,14 @@ import type { ProviderInfo } from "./validate";
 
 const text = { type: "string", minLength: 1 } as const;
 
+/** The instructions planner's `outputSchema`: only the rewritten instructions. */
+export const INSTRUCTIONS_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["instructions"],
+  properties: { instructions: text },
+};
+
 /** The role planner's `outputSchema`: one role, every field present. */
 export const ROLE_JSON_SCHEMA = {
   type: "object",
@@ -32,6 +40,7 @@ export const TEAM_JSON_SCHEMA = {
 // outputSchema isn't enforced by every provider (Claude answered with its own key names),
 // so the prompt shows the exact shape too.
 const ROLE_EXAMPLE = { name: "<role>", provider: "<provider id>", model: "<model id>", folders: ["<relative/path>"], instructions: "<what this role does>" };
+const INSTRUCTIONS_EXAMPLE = { instructions: "<improved instructions>" };
 const EXAMPLE = {
   version: 1,
   goal: "<the goal>",
@@ -121,4 +130,42 @@ export function extractRole(message: string | null): { ok: true; role: Role } | 
   const result = RoleSchema.safeParse(json.value);
   if (result.success) return { ok: true, role: result.data };
   return { ok: false, errors: result.error.issues.map((issue) => `${issue.path.join(".") || "role"}: ${issue.message}`) };
+}
+
+/** Asks a planner to improve one role's instructions without requiring a valid team draft. */
+export function instructionsPrompt(role: Pick<Role, "name" | "folders" | "instructions">, request: string, team: TeamOutline & { goal: string }): string {
+  const roles = team.roles.filter((other) => other.name !== role.name).map((other) => `- ${other.name} (folders ${other.folders.length ? other.folders.join(", ") : "any"})`);
+  return [
+    "Rewrite this role's instructions for this project's agent team in Paseo.",
+    "",
+    `Role: ${role.name}`,
+    `Folders: ${role.folders.length ? role.folders.join(", ") : "any"}`,
+    `Current instructions: ${role.instructions}`,
+    ...(request.trim() ? [`User request: ${request.trim()}`] : []),
+    "",
+    `Team goal: ${team.goal}`,
+    `Orchestrator workspace: ${team.orchestratorWorkspace}`,
+    "Other roles:",
+    ...(roles.length ? roles : ["- (none)"]),
+    "",
+    "Rules:",
+    "- Look around the repository, including CLAUDE.md and the role's folders, to ground the instructions in what is there. Do not create, change or delete any file.",
+    "- Write a few concrete imperative sentences that the orchestrator can paste into a role agent's task.",
+    "- Stay within the role's folders and do not take over other roles' work.",
+    "- Follow the user's request when given.",
+    "- Write in the same language as the current instructions; use English when they are empty.",
+    "- Answer with JSON only, using exactly these keys and no others:",
+    JSON.stringify(INSTRUCTIONS_EXAMPLE, null, 2),
+  ].join("\n");
+}
+
+/** Reads the instructions planner's final message, tolerating a code fence or surrounding text. */
+export function extractInstructions(message: string | null): { ok: true; instructions: string } | { ok: false; errors: string[] } {
+  const json = jsonIn(message, "instructions");
+  if (!json.ok) return json;
+  const value = json.value;
+  if (typeof value !== "object" || value === null || !("instructions" in value) || typeof value.instructions !== "string" || !value.instructions.trim()) {
+    return { ok: false, errors: ["instructions: expected a non-empty string"] };
+  }
+  return { ok: true, instructions: value.instructions.trim() };
 }

@@ -8,7 +8,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { withFreeWorkspaces } from "../shared/apply-plan";
 import { foldersText, newRole, parseFolders, uniqueName } from "../shared/draft";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
+import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, type Role, type Team } from "../shared/team";
 import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
@@ -109,7 +109,7 @@ function ModelPicker({ s, catalog, provider, model, onChange }: { s: Styles; cat
   );
 }
 
-function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role: Role; catalog: readonly ProviderInfo[]; onChange(role: Role): void; onRemove(): void }) {
+function RoleEditor({ s, role, catalog, onChange, onEditInstructions, onRemove }: { s: Styles; role: Role; catalog: readonly ProviderInfo[]; onChange(role: Role): void; onEditInstructions(): void; onRemove(): void }) {
   const { t } = useTranslation(messages);
   const [folders, setFolders] = useState(foldersText(role.folders));
   const [showFolders, setShowFolders] = useState(role.folders.length > 0);
@@ -162,7 +162,14 @@ function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role:
       )}
       <View style={{ gap: 4 }}>
         <Text style={s.muted}>{t("role.instructions")}</Text>
-        <TextInput style={s.input} value={role.instructions} placeholder={t("role.instructions")} multiline onChangeText={(instructions) => onChange({ ...role, instructions })} />
+        {role.instructions.trim() ? (
+          <Text numberOfLines={3} style={s.text}>{role.instructions.trim()}</Text>
+        ) : (
+          <Text style={s.muted}>{t("role.noInstructions")}</Text>
+        )}
+        <View style={s.row}>
+          <Button s={s} secondary label={t("role.editInstructions")} onPress={onEditInstructions} />
+        </View>
       </View>
     </View>
   );
@@ -170,6 +177,186 @@ function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role:
 
 /** Where the team goes: a workspace's project, or a project picked without a workspace. */
 type Target = { workspaceId: string } | { projectId: string };
+
+function InstructionsDialog({
+  s,
+  accentColor,
+  target,
+  team,
+  role,
+  onSave,
+  onClose,
+}: {
+  s: Styles;
+  accentColor: string;
+  target: Target;
+  team: Team | null;
+  role: Role | null;
+  onSave(instructions: string): void;
+  onClose(): void;
+}) {
+  const { t } = useTranslation(messages);
+  const improve = useRpc(teamInstructionsImproveRpc);
+  const instructionsProposal = useRpc(teamInstructionsProposalRpc);
+  const open = role !== null && team !== null;
+  const [instructions, setInstructions] = useState("");
+  const [request, setRequest] = useState("");
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [plannerId, setPlannerId] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const requestCounter = useRef(0);
+
+  const stopTracking = () => {
+    requestCounter.current += 1;
+    setStarting(false);
+    setStartError(null);
+    setPlannerId(null);
+  };
+
+  useEffect(() => {
+    if (!open || !role) {
+      stopTracking();
+      return;
+    }
+    stopTracking();
+    setInstructions(role.instructions);
+    setRequest("");
+    setSuggestion(null);
+  }, [open]);
+
+  const planning = useQuery({
+    queryKey: ["workspace-agents", "instructions-proposal", plannerId],
+    queryFn: () => instructionsProposal({ agentId: plannerId! }),
+    enabled: plannerId !== null,
+    refetchInterval: (query) => (query.state.data?.status === "running" || !query.state.data ? 2000 : false),
+  });
+
+  useEffect(() => {
+    if (planning.data?.status !== "done") return;
+    setSuggestion(planning.data.instructions);
+    setPlannerId(null);
+  }, [planning.data]);
+
+  const startImprove = useMutation({
+    onMutate: () => {
+      const currentRequest = ++requestCounter.current;
+      setStarting(true);
+      setStartError(null);
+      setPlannerId(null);
+      setSuggestion(null);
+      return { request: currentRequest };
+    },
+    mutationFn: ({ currentRole, currentTeam, currentInstructions, currentRequest }: { currentRole: Role; currentTeam: Team; currentInstructions: string; currentRequest: string }) =>
+      improve({
+        ...target,
+        role: { name: currentRole.name, folders: currentRole.folders, instructions: currentInstructions },
+        request: currentRequest,
+        team: {
+          goal: currentTeam.goal,
+          orchestratorWorkspace: currentTeam.orchestrator.workspace,
+          roles: currentTeam.roles.map(({ name, folders }) => ({ name, folders })),
+        },
+      }),
+    onSuccess: ({ agentId }, _vars, context) => {
+      if (requestCounter.current !== context.request) return;
+      setStarting(false);
+      setPlannerId(agentId);
+    },
+    onError: (error, _vars, context) => {
+      if (requestCounter.current !== context?.request) return;
+      setStarting(false);
+      setStartError(String(error));
+    },
+  });
+
+  const busy = starting || (plannerId !== null && planning.data?.status !== "failed");
+
+  const close = () => {
+    stopTracking();
+    setSuggestion(null);
+    setRequest("");
+    onClose();
+  };
+
+  return (
+    <Modal
+      title={t("role.instructionsTitle", { role: role?.name.trim() || t("role.name") })}
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) close();
+      }}
+    >
+      <Modal.Content>
+        {open && role && team ? (
+          <>
+            <TextInput
+              style={[s.input, { minHeight: 120, textAlignVertical: "top" }]}
+              value={instructions}
+              placeholder={t("role.instructions")}
+              multiline
+              onChangeText={setInstructions}
+            />
+            {suggestion !== null ? (
+              <View style={s.card}>
+                <Text style={s.text}>{suggestion}</Text>
+                <View style={s.row}>
+                  <Button
+                    s={s}
+                    label={t("role.applySuggestion")}
+                    onPress={() => {
+                      setInstructions(suggestion);
+                      setSuggestion(null);
+                    }}
+                  />
+                  <Button s={s} secondary label={t("role.discardSuggestion")} onPress={() => setSuggestion(null)} />
+                </View>
+              </View>
+            ) : null}
+            <View style={s.card}>
+              <TextInput
+                style={s.input}
+                value={request}
+                placeholder={t("role.improveRequestPlaceholder")}
+                multiline
+                onChangeText={setRequest}
+              />
+              <View style={s.row}>
+                <Button
+                  s={s}
+                  secondary
+                  label={t("role.improveWithAi")}
+                  disabled={busy}
+                  onPress={() => startImprove.mutate({ currentRole: role, currentTeam: team, currentInstructions: instructions, currentRequest: request })}
+                />
+                {busy ? (
+                  <>
+                    <ActivityIndicator color={accentColor} />
+                    <Text style={s.muted}>{t("role.instructionsPlanning")}</Text>
+                  </>
+                ) : null}
+              </View>
+              {planning.data?.status === "failed" ? planning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+              {planning.error ? <Text style={s.danger}>{String(planning.error)}</Text> : null}
+              {startError ? <Text style={s.danger}>{startError}</Text> : null}
+            </View>
+            <View style={s.row}>
+              <Button s={s} secondary label={t("review.cancel")} onPress={close} />
+              <Button
+                s={s}
+                label={t("role.saveInstructions")}
+                onPress={() => {
+                  onSave(instructions);
+                  close();
+                }}
+              />
+            </View>
+          </>
+        ) : null}
+      </Modal.Content>
+    </Modal>
+  );
+}
 
 type Applied = Extract<RpcOutput<typeof teamApplyRpc>, { ok: true }>;
 
@@ -198,6 +385,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const [goal, setGoal] = useState("");
   const [plannerId, setPlannerId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Team | null>(null);
+  const [editingRoleIndex, setEditingRoleIndex] = useState<number | null>(null);
   const [roleGroupWidth, setRoleGroupWidth] = useState(0);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [picker, setPicker] = useState<SelectRequest | null>(null);
@@ -523,6 +711,20 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
         </Modal.Content>
       </Modal>
 
+      <InstructionsDialog
+        s={s}
+        accentColor={theme.colors.accent}
+        target={target}
+        team={draft}
+        role={editingRoleIndex !== null && draft ? draft.roles[editingRoleIndex] ?? null : null}
+        onSave={(instructions) => {
+          if (editingRoleIndex !== null && draft?.roles[editingRoleIndex]) {
+            updateRole(editingRoleIndex, { ...draft.roles[editingRoleIndex]!, instructions });
+          }
+        }}
+        onClose={() => setEditingRoleIndex(null)}
+      />
+
       {!draft ? !data.team && (
         <View style={s.card}>
           <Text style={s.text}>{t(here === null ? "create.intro" : "create.introHere")}</Text>
@@ -559,7 +761,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
                 {roleRows.map((row) => (
                   <View key={row[0]!.index} style={s.roleRow}>
                     {row.map(({ role, index }) => (
-                      <RoleEditor key={index} s={s} role={role} catalog={catalog} onChange={(next) => updateRole(index, next)} onRemove={() => setDraft((current) => (current ? { ...current, roles: current.roles.filter((_, at) => at !== index) } : current))} />
+                      <RoleEditor key={index} s={s} role={role} catalog={catalog} onChange={(next) => updateRole(index, next)} onEditInstructions={() => setEditingRoleIndex(index)} onRemove={() => setDraft((current) => (current ? { ...current, roles: current.roles.filter((_, at) => at !== index) } : current))} />
                     ))}
                     {Array.from({ length: columns - row.length }, (_, spacer) => (
                       <View key={`spacer-${spacer}`} style={s.roleSpacer} />
@@ -580,7 +782,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
             {problems.map((problem) => <Text key={problem} style={s.danger}>{problem}</Text>)}
             <View style={s.row}>
               <Button s={s} label={t("review.apply")} disabled={problems.length > 0 || applied.isPending} onPress={() => applied.mutate(draft)} />
-              <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelRolePlanning(); setPicker(null); setDraft(null); setPlannerId(null); }} />
+              <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelRolePlanning(); setPicker(null); setEditingRoleIndex(null); setDraft(null); setPlannerId(null); }} />
             </View>
           </View>
         </SelectContext.Provider>
