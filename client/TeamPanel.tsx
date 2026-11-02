@@ -3,7 +3,7 @@ import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plu
 import { useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { Modal } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { withFreeWorkspaces } from "../shared/apply-plan";
 import { foldersText, newRole, parseFolders, uniqueName } from "../shared/draft";
@@ -25,13 +25,37 @@ export function styles(colors: Colors, compact: boolean) {
     danger: { color: colors.statusDanger, fontSize: 12 },
     success: { color: colors.statusSuccess },
     card: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, gap: 6, backgroundColor: colors.surface1 },
+    orchestratorCard: {
+      borderTopWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 1,
+      borderLeftWidth: 6,
+      borderTopColor: colors.border,
+      borderRightColor: colors.border,
+      borderBottomColor: colors.border,
+      borderLeftColor: colors.accent,
+      borderRadius: 8,
+      padding: 10,
+      gap: 6,
+      backgroundColor: colors.surface2,
+    },
+    orchestratorLabel: { color: colors.accent, fontSize: 11, fontWeight: "700" as const, textTransform: "uppercase" as const, letterSpacing: 0.5 },
+    roleGroupWrap: { flexDirection: "row" as const, paddingLeft: 2, gap: 20 },
+    roleConnector: { width: 2, borderRadius: 1, backgroundColor: colors.accent, opacity: 0.4 },
+    roleGroup: { flex: 1, minWidth: 0, gap: 10 },
+    roleRow: { flexDirection: "row" as const, alignItems: "stretch" as const, gap: 10 },
+    roleCard: { flex: 1, minWidth: 0 },
+    roleSpacer: { flex: 1, minWidth: 0 },
     input: { borderWidth: 1, borderColor: colors.border, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, color: colors.foreground, backgroundColor: colors.surface0 },
     row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6, alignItems: "center" as const },
     button: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, backgroundColor: colors.accent },
     buttonText: { color: colors.accentForeground, fontWeight: "600" as const },
     secondary: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: colors.border },
-    chip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
-    chipOn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: colors.accent, backgroundColor: colors.accent },
+    select: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface0 },
+    option: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface0 },
+    optionActive: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: colors.accent, backgroundColor: colors.surface2 },
+    optionOn: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: colors.accent, backgroundColor: colors.accent },
+    optionOnActive: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: colors.foreground, backgroundColor: colors.accent },
   };
 }
 
@@ -45,26 +69,42 @@ export function Button({ s, label, onPress, disabled, secondary }: { s: Styles; 
   );
 }
 
-function Chips({ s, options, value, onChange }: { s: Styles; options: readonly string[]; value: string; onChange(value: string): void }) {
+type SelectRequest = { label: string; options: readonly string[]; value: string; onChange(value: string): void };
+const SelectContext = createContext<(request: SelectRequest) => void>(() => {});
+
+function Select({ s, label, options, value, onChange }: { s: Styles; label: string; options: readonly string[]; value: string; onChange(value: string): void }) {
+  const openSelect = useContext(SelectContext);
   return (
-    <View style={s.row}>
-      {options.map((option) => (
-        <Pressable key={option} accessibilityRole="button" accessibilityLabel={option} onPress={() => onChange(option)} style={option === value ? s.chipOn : s.chip}>
-          <Text style={option === value ? s.buttonText : s.text}>{option}</Text>
-        </Pressable>
-      ))}
-    </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      onPress={() => openSelect({ label, options, value, onChange })}
+      style={s.select}
+    >
+      <Text style={s.text}>{value || "—"}</Text>
+      <Text style={s.muted}>▾</Text>
+    </Pressable>
   );
 }
 
 /** Provider and model pickers limited to what this host can run. */
 function ModelPicker({ s, catalog, provider, model, onChange }: { s: Styles; catalog: readonly ProviderInfo[]; provider: string; model: string; onChange(next: { provider: string; model: string }): void }) {
+  const { t } = useTranslation(messages);
   const ready = catalog.filter((entry) => entry.ready);
   const models = ready.find((entry) => entry.id === provider)?.models.map((entry) => entry.id) ?? [];
   return (
-    <View style={{ gap: 4 }}>
-      <Chips s={s} options={ready.map((entry) => entry.id)} value={provider} onChange={(next) => onChange({ provider: next, model: ready.find((entry) => entry.id === next)?.models[0]?.id ?? "" })} />
-      <Chips s={s} options={models} value={model} onChange={(next) => onChange({ provider, model: next })} />
+    <View style={s.row}>
+      <Text style={s.muted}>{t("role.providerAndModel")}</Text>
+      <Select
+        s={s}
+        label={t("role.provider")}
+        options={ready.map((entry) => entry.id)}
+        value={provider}
+        onChange={(next) => {
+          if (next !== provider) onChange({ provider: next, model: ready.find((entry) => entry.id === next)?.models[0]?.id ?? "" });
+        }}
+      />
+      <Select s={s} label={t("role.model")} options={models} value={model} onChange={(next) => onChange({ provider, model: next })} />
     </View>
   );
 }
@@ -72,27 +112,58 @@ function ModelPicker({ s, catalog, provider, model, onChange }: { s: Styles; cat
 function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role: Role; catalog: readonly ProviderInfo[]; onChange(role: Role): void; onRemove(): void }) {
   const { t } = useTranslation(messages);
   const [folders, setFolders] = useState(foldersText(role.folders));
-  // Keyed by position, so resync when another role's removal hands this editor different folders.
+  const [showFolders, setShowFolders] = useState(role.folders.length > 0);
+  const currentName = useRef(role.name);
+  // Keyed by position, so resync when another role's removal hands this editor a different role.
   useEffect(() => {
-    if (foldersText(parseFolders(folders)) !== foldersText(role.folders)) setFolders(foldersText(role.folders));
-  }, [role.folders]);
+    const switched = role.name !== currentName.current;
+    currentName.current = role.name;
+    if (switched || foldersText(parseFolders(folders)) !== foldersText(role.folders)) {
+      setFolders(foldersText(role.folders));
+      setShowFolders(role.folders.length > 0);
+    }
+  }, [role.name, role.folders]);
+  const foldersExpanded = showFolders || role.folders.length > 0;
   return (
-    <View style={s.card}>
-      <View style={s.row}>
-        <TextInput style={[s.input, { flex: 1 }]} value={role.name} placeholder={t("role.name")} onChangeText={(name) => onChange({ ...role, name })} />
-        <Button s={s} secondary label={t("role.remove")} onPress={onRemove} />
+    <View style={[s.card, s.roleCard]}>
+      <View style={{ gap: 4 }}>
+        <Text style={s.muted}>{t("role.name")}</Text>
+        <View style={s.row}>
+          <TextInput
+            style={[s.input, { flex: 1, minWidth: 0 }]}
+            value={role.name}
+            placeholder={t("role.name")}
+            onChangeText={(name) => {
+              currentName.current = name;
+              onChange({ ...role, name });
+            }}
+          />
+          <Button s={s} secondary label={t("role.remove")} onPress={onRemove} />
+        </View>
       </View>
       <ModelPicker s={s} catalog={catalog} provider={role.provider} model={role.model} onChange={(next) => onChange({ ...role, ...next })} />
-      <TextInput
-        style={s.input}
-        value={folders}
-        placeholder={t("role.folders")}
-        onChangeText={(text) => {
-          setFolders(text);
-          onChange({ ...role, folders: parseFolders(text) });
-        }}
-      />
-      <TextInput style={s.input} value={role.instructions} placeholder={t("role.instructions")} multiline onChangeText={(instructions) => onChange({ ...role, instructions })} />
+      {foldersExpanded ? (
+        <View style={{ gap: 4 }}>
+          <Text style={s.muted}>{t("role.folders")}</Text>
+          <TextInput
+            style={s.input}
+            value={folders}
+            placeholder={t("role.folders")}
+            onChangeText={(text) => {
+              setFolders(text);
+              onChange({ ...role, folders: parseFolders(text) });
+            }}
+          />
+        </View>
+      ) : (
+        <View style={s.row}>
+          <Button s={s} secondary label={t("role.setFolders")} onPress={() => setShowFolders(true)} />
+        </View>
+      )}
+      <View style={{ gap: 4 }}>
+        <Text style={s.muted}>{t("role.instructions")}</Text>
+        <TextInput style={s.input} value={role.instructions} placeholder={t("role.instructions")} multiline onChangeText={(instructions) => onChange({ ...role, instructions })} />
+      </View>
     </View>
   );
 }
@@ -127,7 +198,25 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const [goal, setGoal] = useState("");
   const [plannerId, setPlannerId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Team | null>(null);
+  const [roleGroupWidth, setRoleGroupWidth] = useState(0);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [picker, setPicker] = useState<SelectRequest | null>(null);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const pickerRef = useRef<SelectRequest | null>(null);
+  pickerRef.current = picker;
+  const listRef = useRef<ScrollView>(null);
+  const rowLayouts = useRef<Record<number, { y: number; height: number }>>({});
+  const listHeight = useRef(0);
+  const scrollY = useRef(0);
+  const openSelect = (request: SelectRequest) => {
+    setPickerQuery("");
+    const index = request.options.indexOf(request.value);
+    setHighlight(index >= 0 ? index : 0);
+    rowLayouts.current = {};
+    scrollY.current = 0;
+    setPicker(request);
+  };
 
   // The planner keeps running when this screen closes; reopening it picks the newest proposal back up.
   // Fetched fresh on every open (gcTime 0) and only once the team is read, since a proposal is fitted to it.
@@ -228,7 +317,44 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const catalog = current.data?.catalog ?? [];
   const checked = draft ? checkTeam(draft) : null;
   const problems = draft && checked?.ok ? [...validateTeam(checked.team, catalog), ...workspaceClashes(checked.team, current.data?.takenWorkspaces ?? [])].map((error) => `${error.target}: ${error.message}`) : (checked && !checked.ok ? checked.errors : []);
-  const updateRole = (index: number, role: Role) => draft && setDraft({ ...draft, roles: draft.roles.map((entry, at) => (at === index ? role : entry)) });
+  const updateRole = (index: number, role: Role) => setDraft((current) => (current ? { ...current, roles: current.roles.map((entry, at) => (at === index ? role : entry)) } : current));
+  const columns = roleGroupWidth < 640 ? 1 : roleGroupWidth < 1000 ? 2 : 3;
+  const roleRows: { role: Role; index: number }[][] = [];
+  if (draft) {
+    for (let i = 0; i < draft.roles.length; i += columns) {
+      roleRows.push(draft.roles.slice(i, i + columns).map((role, offset) => ({ role, index: i + offset })));
+    }
+  }
+  const pickerNeedle = pickerQuery.trim().toLowerCase();
+  const pickerOptions = picker ? (pickerNeedle ? picker.options.filter((option) => option.toLowerCase().includes(pickerNeedle)) : picker.options) : [];
+  const highlightedIndex = pickerOptions.length > 0 ? Math.min(highlight, pickerOptions.length - 1) : -1;
+  const pickOption = (option: string) => {
+    const active = pickerRef.current;
+    if (!active) return;
+    pickerRef.current = null;
+    setPicker(null);
+    setPickerQuery("");
+    active.onChange(option);
+  };
+  const pickHighlighted = () => {
+    if (highlightedIndex >= 0 && highlightedIndex < pickerOptions.length) {
+      pickOption(pickerOptions[highlightedIndex]!);
+    }
+  };
+  useEffect(() => {
+    if (!picker || highlightedIndex < 0) return;
+    const row = rowLayouts.current[highlightedIndex] ?? { y: highlightedIndex * 40, height: 36 };
+    const viewHeight = listHeight.current || 320;
+    const top = scrollY.current;
+    if (row.y < top) {
+      scrollY.current = row.y;
+      listRef.current?.scrollTo({ y: row.y, animated: false });
+    } else if (row.y + row.height > top + viewHeight) {
+      const nextY = row.y + row.height - viewHeight;
+      scrollY.current = nextY;
+      listRef.current?.scrollTo({ y: nextY, animated: false });
+    }
+  }, [highlightedIndex, picker, pickerQuery]);
   const teamBusy = plannerId !== null && (!planning.data || planning.data.status === "running");
   const progress = applied.isPending
     ? { status: t("result.applying"), error: null, plannerId: null, onCancel: null }
@@ -317,6 +443,92 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
         </Modal.Content>
       </Modal>
 
+      <Modal
+        title={picker?.label ?? ""}
+        open={picker !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            pickerRef.current = null;
+            setPicker(null);
+            setPickerQuery("");
+          }
+        }}
+      >
+        <Modal.Content>
+          {picker ? (
+            <>
+              <TextInput
+                style={s.input}
+                value={pickerQuery}
+                placeholder={t("role.searchPlaceholder")}
+                autoFocus
+                onChangeText={(text) => {
+                  rowLayouts.current = {};
+                  scrollY.current = 0;
+                  setPickerQuery(text);
+                  setHighlight(0);
+                }}
+                onKeyPress={(event) => {
+                  const key = event.nativeEvent.key;
+                  if (key === "ArrowDown") {
+                    event.preventDefault?.();
+                    if (pickerOptions.length > 0) {
+                      setHighlight((current) => Math.min(pickerOptions.length - 1, Math.min(current, pickerOptions.length - 1) + 1));
+                    }
+                  } else if (key === "ArrowUp") {
+                    event.preventDefault?.();
+                    if (pickerOptions.length > 0) {
+                      setHighlight((current) => Math.max(0, Math.min(current, pickerOptions.length - 1) - 1));
+                    }
+                  } else if (key === "Enter") {
+                    event.preventDefault?.();
+                    pickHighlighted();
+                  }
+                }}
+                onSubmitEditing={pickHighlighted}
+              />
+              <ScrollView
+                ref={listRef}
+                style={{ maxHeight: 320 }}
+                contentContainerStyle={{ gap: 4 }}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                scrollEventThrottle={16}
+                onLayout={(event) => {
+                  listHeight.current = event.nativeEvent.layout.height;
+                }}
+                onScroll={(event) => {
+                  scrollY.current = event.nativeEvent.contentOffset.y;
+                }}
+              >
+                {pickerOptions.length === 0 ? <Text style={s.muted}>{t(picker.options.length === 0 ? "role.noOptions" : "role.noMatches")}</Text> : null}
+                {pickerOptions.map((option, index) => {
+                  const selected = option === picker.value;
+                  const focused = index === highlightedIndex;
+                  return (
+                    <Pressable
+                      key={option}
+                      accessibilityRole="button"
+                      accessibilityLabel={option}
+                      accessibilityState={{ selected }}
+                      onLayout={(event) => {
+                        const { y, height } = event.nativeEvent.layout;
+                        rowLayouts.current[index] = { y, height };
+                      }}
+                      onPress={() => pickOption(option)}
+                      style={selected ? (focused ? s.optionOnActive : s.optionOn) : focused ? s.optionActive : s.option}
+                    >
+                      <Text style={selected ? s.buttonText : s.text}>{option}</Text>
+                      {selected ? <Text style={s.buttonText}>✓</Text> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
+          ) : null}
+        </Modal.Content>
+      </Modal>
+
       {!draft ? (
         <View style={s.card}>
           <Text style={s.text}>{t(here === null ? "create.intro" : "create.introHere")}</Text>
@@ -330,33 +542,55 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           {plannerId && navigation ? <Button s={s} secondary label={t("create.openPlanner")} onPress={() => navigation.openAgent({ agentId: plannerId })} /> : null}
         </View>
       ) : (
-        <View style={{ gap: 10 }}>
-          <Text style={s.title}>{t("review.title")}</Text>
-          <View style={s.card}>
-            {here === null ? <>
-              <Text style={s.text}>{t("review.orchestrator")}</Text>
-              <TextInput style={s.input} value={draft.orchestrator.workspace} placeholder={t("role.workspace")} onChangeText={(workspace) => setDraft({ ...draft, orchestrator: { ...draft.orchestrator, workspace } })} />
-            </> : <Text style={s.text}>{t("review.orchestratorHere", { workspace: here })}</Text>}
-            <ModelPicker s={s} catalog={catalog} provider={draft.orchestrator.provider} model={draft.orchestrator.model} onChange={(next) => setDraft({ ...draft, orchestrator: { ...draft.orchestrator, ...next } })} />
-          </View>
-          {draft.roles.map((role, index) => (
-            <RoleEditor key={index} s={s} role={role} catalog={catalog} onChange={(next) => updateRole(index, next)} onRemove={() => setDraft({ ...draft, roles: draft.roles.filter((_, at) => at !== index) })} />
-          ))}
-          <Button s={s} secondary label={t("review.addRole")} onPress={() => setDraft({ ...draft, roles: [...draft.roles, newRole(catalog, draft.roles.map((role) => role.name))] })} />
-          <View style={s.card}>
-            <TextInput style={s.input} value={roleDescription} placeholder={t("review.roleDescription")} multiline onChangeText={setRoleDescription} />
-            <View style={s.row}>
-              <Button s={s} secondary label={t("review.addRoleWithAi")} disabled={!roleDescription.trim() || roleBusy} onPress={() => startRole.mutate(draft)} />
+        <SelectContext.Provider value={openSelect}>
+          <View style={{ gap: 10 }}>
+            <Text style={s.title}>{t("review.title")}</Text>
+            <View style={s.orchestratorCard}>
+              <Text style={s.orchestratorLabel}>{t("review.orchestrator")}</Text>
+              {here === null ? (
+                <TextInput style={s.input} value={draft.orchestrator.workspace} placeholder={t("role.workspace")} onChangeText={(workspace) => setDraft((current) => (current ? { ...current, orchestrator: { ...current.orchestrator, workspace } } : current))} />
+              ) : (
+                <Text style={s.text}>{t("review.orchestratorHere", { workspace: here })}</Text>
+              )}
+              <ModelPicker s={s} catalog={catalog} provider={draft.orchestrator.provider} model={draft.orchestrator.model} onChange={(next) => setDraft((current) => (current ? { ...current, orchestrator: { ...current.orchestrator, ...next } } : current))} />
             </View>
-            {rolePlanning.data?.status === "failed" ? rolePlanning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
-            {roleStartError ? <Text style={s.danger}>{roleStartError}</Text> : null}
+            <View style={s.roleGroupWrap}>
+              <View style={s.roleConnector} />
+              <View
+                style={s.roleGroup}
+                onLayout={(event) => {
+                  const nextWidth = Math.round(event.nativeEvent.layout.width);
+                  setRoleGroupWidth((current) => (current === nextWidth ? current : nextWidth));
+                }}
+              >
+                {roleRows.map((row) => (
+                  <View key={row[0]!.index} style={s.roleRow}>
+                    {row.map(({ role, index }) => (
+                      <RoleEditor key={index} s={s} role={role} catalog={catalog} onChange={(next) => updateRole(index, next)} onRemove={() => setDraft((current) => (current ? { ...current, roles: current.roles.filter((_, at) => at !== index) } : current))} />
+                    ))}
+                    {Array.from({ length: columns - row.length }, (_, spacer) => (
+                      <View key={`spacer-${spacer}`} style={s.roleSpacer} />
+                    ))}
+                  </View>
+                ))}
+                <Button s={s} secondary label={t("review.addRole")} onPress={() => setDraft((current) => (current ? { ...current, roles: [...current.roles, newRole(catalog, current.roles.map((role) => role.name))] } : current))} />
+                <View style={s.card}>
+                  <TextInput style={s.input} value={roleDescription} placeholder={t("review.roleDescription")} multiline onChangeText={setRoleDescription} />
+                  <View style={s.row}>
+                    <Button s={s} secondary label={t("review.addRoleWithAi")} disabled={!roleDescription.trim() || roleBusy} onPress={() => startRole.mutate(draft)} />
+                  </View>
+                  {rolePlanning.data?.status === "failed" ? rolePlanning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+                  {roleStartError ? <Text style={s.danger}>{roleStartError}</Text> : null}
+                </View>
+              </View>
+            </View>
+            {problems.map((problem) => <Text key={problem} style={s.danger}>{problem}</Text>)}
+            <View style={s.row}>
+              <Button s={s} label={t("review.apply")} disabled={problems.length > 0 || applied.isPending} onPress={() => applied.mutate(draft)} />
+              <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelRolePlanning(); setPicker(null); setDraft(null); setPlannerId(null); }} />
+            </View>
           </View>
-          {problems.map((problem) => <Text key={problem} style={s.danger}>{problem}</Text>)}
-          <View style={s.row}>
-            <Button s={s} label={t("review.apply")} disabled={problems.length > 0 || applied.isPending} onPress={() => applied.mutate(draft)} />
-            <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelRolePlanning(); setDraft(null); setPlannerId(null); }} />
-          </View>
-        </View>
+        </SelectContext.Provider>
       )}
 
       {cancelled.error ? <Text style={s.danger}>{String(cancelled.error)}</Text> : null}
