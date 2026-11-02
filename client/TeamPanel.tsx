@@ -529,7 +529,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
         </Modal.Content>
       </Modal>
 
-      {!draft ? (
+      {!draft ? !data.team && (
         <View style={s.card}>
           <Text style={s.text}>{t(here === null ? "create.intro" : "create.introHere")}</Text>
           <TextInput style={s.input} value={goal} placeholder={t("create.goalPlaceholder")} onChangeText={setGoal} />

@@ -40,6 +40,6 @@
 - e2e "applies the team: file, workspaces and orchestrator"가 `tests/daemon.e2e.test.ts:163`에서 실패한다. `projectTeamsList`는 팀 파일 경로를 상대 경로로, Apply는 절대 경로로 돌려준다. 어느 쪽이 맞는지 정해 한쪽을 맞출 것.
   Evidence: 2026-10-30 e2e 실행에서 기대값은 `/var/folders/.../pwa-game-KWDUAb/.agents/teams/orchestrator.json`, 실제값은 `.agents/teams/orchestrator.json`이었다.
 
-<!-- followup: fu-83ae26233411 | source: team-editor-select-layout | task: 14 | date: 2026-11-02 | status: open | taken: - -->
+<!-- followup: fu-83ae26233411 | source: team-editor-select-layout | task: 14 | date: 2026-11-02 | status: taken | taken: 16 -->
 - 팀이 이미 있는 워크스페이스의 팀 패널에 "This workspace has no team yet…" 생성 카드가 팀 요약 아래에 함께 보인다. 문구가 사실과 다르고, 같은 워크스페이스에 두 번째 팀을 만들라는 것처럼 읽힌다.
   Evidence: app.paseo.sh orchestrator-2 팀 패널에서 확인. `client/TeamPanel.tsx`의 생성 카드 조건이 `!draft`뿐이고, 5fa77ca에도 같은 조건이었다.
