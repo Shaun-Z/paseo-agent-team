@@ -27,7 +27,7 @@ Paseo plugins have two runtimes, each with one entry that default-exports a `con
 
 - `index.server.ts` + `server/` run in a daemon subprocess. `server/team.ts` holds every RPC handler; handlers get `{ paseo }` (the Paseo SDK) and do the filesystem and agent work.
 - `index.client.tsx` + `client/` run inside the Paseo app (React Native, all platforms). It registers a workspace panel (`TeamPanel`), an always-visible sidebar item and screen that lists every project's teams and creates new ones (`TeamScreen`), and a Command Center item.
-- `shared/` is compiled into both and must stay pure (Zod contracts and plain values, no Node or React Native APIs). It holds the team schema (`team.ts`), RPC contracts (`rpc.ts`), provider/model validation (`validate.ts`), the planner and orchestrator prompts (`proposal.ts`, `prompt.ts`), workspace matching (`apply-plan.ts`), planner cleanup (`cleanup.ts`) and UI strings (`messages.ts`, English and Korean). Most logic lives here so it can be unit-tested without a daemon.
+- `shared/` is compiled into both and must stay pure (Zod contracts and plain values, no Node or React Native APIs). It holds the team schema (`team.ts`), RPC contracts (`rpc.ts`), provider/model validation (`validate.ts`), the planner and orchestrator prompts (`proposal.ts`, `prompt.ts`), workspace matching (`apply-plan.ts`), planner cleanup (`cleanup.ts`) and UI strings (`messages.ts`, English, Korean, Japanese and Simplified Chinese). Most logic lives here so it can be unit-tested without a daemon.
 
 The user-facing flow is propose → review → apply. Propose starts a planner agent with `outputSchema: TEAM_JSON_SCHEMA`. The client then polls `teamProposal`, which calls `waitForFinish(1000)` and parses the planner's last message. Apply re-validates, refuses workspaces another team of the project uses, writes the team's own file, reuses or creates the orchestrator's workspace matched by title, and then either tells a running orchestrator on the same provider/model to re-read the team or starts a new one. Finally it archives planner agents and an emptied `Team planner` workspace.
 
@@ -45,13 +45,14 @@ Key details that span files:
 - Agents get `modeId: "auto"` only when the provider's snapshot `modes` include `auto` (`autoModeOf`). Otherwise the provider's default mode applies.
 - `outputSchema` is not enforced by every provider, so `proposal.ts` also embeds an example of the exact shape in the prompt and parses defensively.
 - Workspace and agent lists are read as a single page; pagination is a known open follow-up in `.forge/followups.md`.
-- Daemon-side error strings are English only; client UI text goes through `client/i18n.ts` and `shared/messages.ts`.
+- Daemon-side error strings are English only; client UI text goes through `client/i18n.ts` and `shared/messages.ts` (see the i18n rule below).
 
 ## Plugin constraints that have bitten this repo
 
 - **Server code must not import `@getpaseo/client`, even with `import type`.** The registry/daemon build rejects it (`paseo-plugin-server-runtime-boundary`), while local `tsc` passes. Derive types from the plugin SDK instead, for example `type PaseoApi = PluginHandlerContext["paseo"]`. `@getpaseo/client` is fine in `tests/`.
 - Client code cannot import `server/` or `node:*`; server code cannot import `client/`. No code modules in the repo root other than the two entries.
 - Client UI must use React Native primitives only and take every text color from `theme.colors`.
+- **Every new user-facing text must be added to all languages at once.** Add the key to `en` in `shared/messages.ts` and to each other resource there (`ko`, `ja`, `zh`), keeping `{{placeholders}}` and plural suffixes identical; never hard-code UI strings in `client/`. A new language needs its resource in `shared/messages.ts`, registration in `client/i18n.ts`, coverage in `tests/messages.test.ts`, its Command Center search `keywords` in `index.client.tsx` (the one per-language list kept outside `messages.ts`), and the Language sections of README and OVERVIEW. Resource keys are language codes (`zh` is Simplified Chinese); i18next falls back from tags like `zh-CN` or `ja-JP` to them, and to `en` when a language is missing.
 - `requirements.paseo` in `paseo-plugin.json` must be raised when adopting newer plugin APIs.
 
 ## Publishing

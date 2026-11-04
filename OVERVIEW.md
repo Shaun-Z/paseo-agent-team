@@ -133,7 +133,7 @@ Planner, orchestrator and role agents start in the provider's reviewed auto mode
 
 ## Language
 
-English and Korean UI text are included. Daemon-side error messages are in English.
+English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-side error messages are in English.
 
 ## Limitations
 

@@ -13,7 +13,7 @@ export default function contribute(client: PluginClientContext) {
     id: "team",
     title: messages.message("commandTitle"),
     icon: "Users",
-    keywords: ["team", "agents", "orchestrator", "팀", "에이전트"],
+    keywords: ["team", "agents", "orchestrator", "팀", "에이전트", "チーム", "エージェント", "团队", "智能体"],
     context: "workspace",
     onSelect({ openPanel }) {
       openPanel("team");

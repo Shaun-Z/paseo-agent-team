@@ -179,7 +179,7 @@ Workspace B panel → team B (.agents/teams/b.json) → orchestrator in B
 
 ## Language
 
-The plugin's UI follows Paseo's app language. English is the default and Korean is included. Error messages from the daemon side are in English.
+The plugin's UI follows Paseo's app language. English is the default, and English, Korean, Japanese and Simplified Chinese UI text are included. Error messages from the daemon side are in English.
 
 ## Limitations
 
