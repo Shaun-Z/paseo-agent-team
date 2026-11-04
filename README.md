@@ -125,7 +125,7 @@ The Agent dashboard can also sit in the right sidebar while you work in the cent
 
 ![Paseo window with the Agent team panel in the center and the Agent dashboard in the right sidebar next to Files and Changes; the orchestrator card is shrunk to its provider icon and model name, and the role cards run off to the right with a horizontal scrollbar at the bottom](images/agent-dashboard-sidebar.png)
 
-The capture shows the orchestrator as the root card, with four role agents under it. `core` and `ui` are running: their cards glow softly, and command packets travel from the orchestrator along the path to them, flashing each card on arrival. `tests` and `release` have finished and show ✓.
+The capture shows the orchestrator as the root card, with six role agents under it (`ui`, `docs`, `release`, `core`, `qa`, `review`). `docs`, `core`, `qa` and `review` are running: their cards glow softly, and command packets travel from the orchestrator along the path to them, flashing each card on arrival. `ui` and `release` have finished and show ✓.
 
 Each card shows the provider logo, the role or caption, the title, and the model, effort (thinking option) and permission mode chips. When an agent has no effort set, its effort chip shows the model's default effort from the provider, dimmed. The badge is **!** when the agent is waiting for a permission or has failed, an amber pulsing dot while it runs, and ✓ when it has finished. Lines to running agents turn into animated red dashes with moving signal dots. An agent that is not running itself but has a running agent below it, such as an orchestrator waiting on its role agents, gets an amber border without the glow. Press a card to open that agent. Closed and archived agents are hidden unless **Show closed** is on.
 
