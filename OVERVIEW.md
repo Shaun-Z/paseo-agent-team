@@ -107,6 +107,7 @@ The choice is remembered per tab, like **Show closed**. Glow, arrival flash, sig
 - Badges: **!** means the agent is waiting for a permission or has failed. An amber pulsing dot means it is running. ✓ means it has finished.
 - Lines to running agents turn into animated red dashes with moving signal dots. An agent that is not running itself but has a running agent below it, such as an orchestrator waiting on its role agents, gets an amber border without the glow.
 - Press a card to open that agent. Closed and archived agents are hidden unless **Show closed** is on.
+- With **Show closed** on, a closed or archived agent card, or a finished sub-agent card, shows a small × that hides it, together with the agents under it, from that dashboard tab. Running cards, cards that need attention (**!**), and cards with a running agent under them have no ×. The header then shows **Restore hidden (N)**, which brings them all back. Hiding does not delete or archive anything in Paseo, and the hidden list is kept per dashboard tab, like **Show closed**.
 
 The dashboard can also sit in the right sidebar while you work in the center of the window.
 

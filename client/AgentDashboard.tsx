@@ -13,7 +13,8 @@ import {
   View,
 } from "react-native";
 import { z } from "zod";
-import { buildAgentForest, type AgentNode } from "../shared/agent-tree";
+import { withAlpha } from "../shared/color";
+import { buildAgentForest, canDismiss, titleParts, type AgentNode } from "../shared/agent-tree";
 import {
   DASHBOARD_DENSITIES,
   DEFAULT_DENSITY,
@@ -36,9 +37,10 @@ const GLOW = "#ff9a9d";
 const AMBER = "#ffb347";
 const stateSchema = z.object({
   showClosed: z.boolean(),
+  dismissed: z.array(z.string()).catch([]),
   density: z.enum(DASHBOARD_DENSITIES).catch(DEFAULT_DENSITY),
 });
-const DEFAULT_STATE = { showClosed: false, density: DEFAULT_DENSITY };
+const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY };
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
 type TreeProps = {
@@ -54,6 +56,8 @@ type TreeProps = {
   open?: (id: string) => void;
   caption: (node: AgentNode) => string;
   waitingLabel: string;
+  hideLabel: string;
+  dismiss?: (id: string) => void;
   subagentLabel: (count: number) => string;
   expandedSubagents: Record<string, boolean>;
   toggleSubagents: (id: string) => void;
@@ -239,6 +243,8 @@ function Card(
     ) : null;
 
   const briefLabel = node.role || node.title;
+  const title = titleParts(node.title);
+  const titleContent = (fontSize: number) => <>{title.name}{title.id !== null ? <Text style={{ color: withAlpha(colors.foregroundMuted, 0.55), fontSize: Math.round(fontSize * 0.85) }}>{" " + title.id}</Text> : null}</>;
   const briefBadgeSpace = node.waiting
     ? 42
     : node.badge === "running"
@@ -281,7 +287,7 @@ function Card(
             fontWeight: "700",
           }}
         >
-          {briefLabel}
+          {node.role ? briefLabel : titleContent(layout.titleFontSize)}
         </Text>
         {showBriefModel && node.model ? (
           <Text
@@ -360,7 +366,7 @@ function Card(
               fontWeight: "700",
             }}
           >
-            {node.title}
+            {titleContent(layout.titleFontSize)}
           </Text>
           <Badge
             node={node}
@@ -438,7 +444,7 @@ function Card(
             fontWeight: "700",
           }}
         >
-          {node.title}
+          {titleContent(layout.titleFontSize)}
         </Text>
         <View
           style={{
@@ -562,6 +568,16 @@ function Card(
     // A role with no session yet: dimmed, and nothing to open.
     opacity: node.waiting ? 0.45 : node.kind === "subagent" ? 0.85 : 1,
   };
+  const hideButton = props.dismiss && canDismiss(node) ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.hideLabel}
+      onPress={(event) => { event.stopPropagation(); props.dismiss?.(node.agent.id); }}
+      style={{ position: "absolute", top: -7, left: -7, width: 16, height: 16, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: colors.surface1, borderWidth: 1, borderColor: colors.border }}
+    >
+      <Text style={{ color: colors.foregroundMuted, fontSize: 12, lineHeight: 14 }}>×</Text>
+    </Pressable>
+  ) : null;
   const card =
     open && !node.waiting && node.kind !== "subagent" ? (
       <Pressable
@@ -571,10 +587,12 @@ function Card(
         style={style}
       >
         {content}
+        {hideButton}
       </Pressable>
     ) : (
       <View accessibilityLabel={node.title} style={style}>
         {content}
+        {hideButton}
       </View>
     );
   if (!node.live) {
@@ -1394,6 +1412,8 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
               : t("subagent")
             : node.agent.provider),
     waitingLabel: t("waiting"),
+    hideLabel: t("hideAgent"),
+    dismiss: state.showClosed ? (id: string) => setState({ ...state, dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed, id] }) : undefined,
     subagentLabel: (count: number) => t("subagentCount", { count }),
     expandedSubagents,
     toggleSubagents,
@@ -1508,6 +1528,11 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
               />
             </View>
           </Pressable>
+          {state.showClosed && state.dismissed.length > 0 ? (
+            <Pressable accessibilityRole="button" onPress={() => setState({ ...state, dismissed: [] })} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("restoreHidden", { count: state.dismissed.length })}</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
       <ScrollView

@@ -67,6 +67,12 @@ export function isHidden(agent: DashboardAgent): boolean {
   return agent.status === "closed" || (!agent.subagent && !!agent.archivedAt);
 }
 
+/** Only finished, inactive sessions can be dismissed from this dashboard tab. */
+export function canDismiss(node: AgentNode): boolean {
+  return !node.waiting && !node.live && !node.delegating && node.badge !== "attention" &&
+    (isHidden(node.agent) || (node.agent.subagent === true && node.agent.status !== "running"));
+}
+
 function kindOf(agent: DashboardAgent): AgentKind {
   if (agent.subagent) return "subagent";
   const job = agent.labels[LABEL];
@@ -82,6 +88,17 @@ function badgeOf(agent: DashboardAgent): AgentBadge {
   return null;
 }
 
+/** Separates the generated uppercase hex suffix from the name for display only. */
+export function formatAgentTitle(title: string): string {
+  return title.trim().replace(/(\S)\s*(#[0-9A-F]{4})$/, "$1 $2");
+}
+
+/** Splits a formatted title so its generated id can be styled separately. */
+export function titleParts(title: string): { name: string; id: string | null } {
+  const match = /^(.*\S) (#[0-9A-F]{4})$/.exec(title);
+  return match ? { name: match[1]!, id: match[2]! } : { name: title, id: null };
+}
+
 /** `defaultEffort` is the model's default thinking option, shown when the agent sets none. */
 export function agentNode(agent: DashboardAgent, children: AgentNode[] = [], defaultEffort?: string): AgentNode {
   const live = agent.status === "running";
@@ -90,7 +107,7 @@ export function agentNode(agent: DashboardAgent, children: AgentNode[] = [], def
     agent,
     kind: kindOf(agent),
     role: agent.labels.role ?? null,
-    title: agent.title?.trim() || agent.id.slice(0, 7),
+    title: formatAgentTitle(agent.title ?? "") || agent.id.slice(0, 7),
     model: agent.model ?? null,
     effort: effort ?? defaultEffort ?? null,
     effortDefault: effort === null && defaultEffort !== undefined,
@@ -135,11 +152,28 @@ const newestFirst = (a: AgentNode, b: AgentNode) => b.agent.createdAt.localeComp
  * Role adoption happens before filtering. Without showClosed, unclosed/unarchived roots with no parent are shown;
  * children keep active branches and the newest idle session per sibling type. Promoted orphans compete by original parent.
  * Branches dropped by this filtering never become roots.
- * With showClosed, all sessions are shown, promoting missing parents and parent cycles to roots as before.
+ * Dismissed sessions and their descendants are excluded first in both modes; waiting nodes are unaffected.
+ * With showClosed, all remaining sessions are shown, promoting missing parents and parent cycles to roots as before.
  */
-export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds: readonly string[], options: { showClosed: boolean; defaultEfforts?: Record<string, string>; roster?: readonly RosterTeam[] }): AgentForest {
+export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds: readonly string[], options: { showClosed: boolean; defaultEfforts?: Record<string, string>; roster?: readonly RosterTeam[]; dismissed?: readonly string[] }): AgentForest {
   const workspaces = new Set(workspaceIds);
-  const scope = agents.filter((agent) => workspaces.has(agent.workspaceId ?? "") && (options.showClosed || !isHidden(agent)));
+  const dismissed = new Set(options.dismissed);
+  if (dismissed.size) {
+    const descendants = new Map<string, string[]>();
+    for (const agent of agents) {
+      const parent = parentOf(agent);
+      if (parent !== undefined) descendants.set(parent, [...(descendants.get(parent) ?? []), agent.id]);
+    }
+    const pending = [...dismissed];
+    for (let index = 0; index < pending.length; index++) {
+      for (const id of descendants.get(pending[index]!) ?? []) {
+        if (dismissed.has(id)) continue;
+        dismissed.add(id);
+        pending.push(id);
+      }
+    }
+  }
+  const scope = agents.filter((agent) => !dismissed.has(agent.id) && workspaces.has(agent.workspaceId ?? "") && (options.showClosed || !isHidden(agent)));
   const byId = new Map(scope.map((agent) => [agent.id, agent]));
   // A child when its parent is shown and it is not its own ancestor; the walk stops at a cycle above it.
   const isChild = (agent: DashboardAgent) => {

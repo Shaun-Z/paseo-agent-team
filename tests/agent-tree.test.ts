@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentNode, buildAgentForest, isHidden, parentOf, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
+import { agentNode, buildAgentForest, canDismiss, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
 import { PROVIDER_LOGOS, providerIcon } from "../shared/provider-icons";
 
 const PARENT = "paseo.parent-agent-id";
@@ -56,6 +56,63 @@ describe("isHidden", () => {
 
   it("keeps the others", () => {
     for (const status of ["initializing", "idle", "running", "error"]) expect(isHidden(agent("a", { status }))).toBe(false);
+  });
+});
+
+describe("formatAgentTitle", () => {
+  it("separates the hex suffix from the name", () => {
+    expect(formatAgentTitle("qa#71C4")).toBe("qa #71C4");
+  });
+
+  it("leaves an already separated suffix unchanged", () => {
+    expect(formatAgentTitle("qa #71C4")).toBe("qa #71C4");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(formatAgentTitle("  qa#71C4  ")).toBe("qa #71C4");
+    expect(formatAgentTitle("  plain  ")).toBe("plain");
+  });
+
+  it("leaves a lone suffix unchanged", () => {
+    expect(formatAgentTitle("#71C4")).toBe("#71C4");
+  });
+
+  it("leaves lowercase, 5-digit and missing suffixes unchanged", () => {
+    expect(formatAgentTitle("ui#ad12")).toBe("ui#ad12");
+    expect(formatAgentTitle("a#12345")).toBe("a#12345");
+    expect(formatAgentTitle("Research image APIs")).toBe("Research image APIs");
+  });
+
+  it("is what agentNode shows, while the agent keeps its original title", () => {
+    const node = agentNode(agent("a", { title: "qa#71C4" }));
+    expect(node.title).toBe("qa #71C4");
+    expect(node.agent.title).toBe("qa#71C4");
+  });
+
+  it("still falls back to the id prefix for an empty title", () => {
+    expect(agentNode(agent("6eebacb4-4e8d", { title: "" })).title).toBe("6eebacb");
+    expect(agentNode(agent("6eebacb4-4e8d", { title: "  " })).title).toBe("6eebacb");
+  });
+});
+
+describe("titleParts", () => {
+  it("splits the name from the id suffix", () => {
+    expect(titleParts("qa #71C4")).toEqual({ name: "qa", id: "#71C4" });
+    expect(titleParts("core #7A3E")).toEqual({ name: "core", id: "#7A3E" });
+  });
+
+  it("gives the same parts for a formatted title", () => {
+    expect(titleParts(formatAgentTitle("qa#71C4"))).toEqual({ name: "qa", id: "#71C4" });
+  });
+
+  it("keeps a name with spaces whole", () => {
+    expect(titleParts("Team editor #1A2B")).toEqual({ name: "Team editor", id: "#1A2B" });
+  });
+
+  it("returns the title and a null id without a valid suffix", () => {
+    for (const title of ["Research image APIs", "ui #ad12", "a #12345", "#71C4"]) {
+      expect(titleParts(title)).toEqual({ name: title, id: null });
+    }
   });
 });
 
@@ -622,5 +679,103 @@ describe("buildAgentForest without showClosed keeps the newest idle child per ty
     const tree = buildAgentForest(agents, scope, show).trees[0]!;
     expect(ids(tree.children)).toEqual(["old", "new"]);
     expect(ids(tree.children[0]!.children)).toEqual(["old-kid"]);
+  });
+});
+
+describe("dismissed agents", () => {
+  const scope = ["wks_a"];
+  const allIds = (options: { showClosed: boolean; dismissed?: string[]; roster?: Parameters<typeof buildAgentForest>[2]["roster"] }, agents: DashboardAgent[]) => {
+    const { trees, solo } = buildAgentForest(agents, scope, options);
+    const seen: string[] = [];
+    const walk = (node: AgentNode) => {
+      seen.push(node.agent.id);
+      node.children.forEach(walk);
+    };
+    [...trees, ...solo].forEach(walk);
+    return seen.sort();
+  };
+  const agents = [
+    agent("p"),
+    child("a", "p", { labels: { role: "a" } }),
+    child("a1", "a", { labels: { role: "x" } }),
+    child("a2", "a1", { status: "running" }),
+    child("sub", "a", { subagent: true, subagentType: "explore", archivedAt: at(1) }),
+    child("b", "p", { labels: { role: "b" } }),
+  ];
+
+  it("leaves a dismissed agent out with showClosed true and false", () => {
+    for (const showClosed of [true, false]) {
+      expect(allIds({ showClosed, dismissed: ["b"] }, agents)).not.toContain("b");
+      expect(allIds({ showClosed, dismissed: ["b"] }, agents)).toContain("a");
+    }
+  });
+
+  it("drops its children, grandchildren and provider sub-agents without promoting them to roots", () => {
+    for (const showClosed of [true, false]) {
+      const result = buildAgentForest(agents, scope, { showClosed, dismissed: ["a"] });
+      expect(allIds({ showClosed, dismissed: ["a"] }, agents)).toEqual(["b", "p"]);
+      expect([...ids(result.trees), ...ids(result.solo)]).toEqual(["p"]);
+    }
+  });
+
+  it("changes nothing when the dismissed id is not present", () => {
+    for (const showClosed of [true, false]) {
+      expect(buildAgentForest(agents, scope, { showClosed, dismissed: ["nope"] })).toEqual(buildAgentForest(agents, scope, { showClosed }));
+      expect(buildAgentForest(agents, scope, { showClosed, dismissed: [] })).toEqual(buildAgentForest(agents, scope, { showClosed }));
+    }
+  });
+
+  it("leaves waiting roster nodes unaffected", () => {
+    const LABEL = "workspace-agents";
+    const roster = [{ orchestratorWorkspaceId: "wks_a", roles: [{ name: "builder", provider: "codex", model: "m", workspaceId: "wks_a" }] }];
+    const lead = agent("o", { labels: { [LABEL]: "orchestrator" } });
+    const withRoster = (dismissed: string[]) => buildAgentForest([lead, child("x", "o", { labels: { role: "other" } })], scope, { showClosed: false, roster, dismissed });
+    const waitingRoles = (forest: ReturnType<typeof buildAgentForest>) => forest.trees[0]!.children.filter((kid) => kid.waiting).map((kid) => kid.role);
+    expect(waitingRoles(withRoster([]))).toEqual(["builder"]);
+    expect(waitingRoles(withRoster(["x"]))).toEqual(["builder"]);
+    expect(ids(withRoster(["x"]).trees[0]!.children)).toEqual(["waiting:o:builder"]);
+  });
+});
+
+describe("canDismiss", () => {
+  const node = (over: Partial<DashboardAgent>, children: AgentNode[] = []) => agentNode(agent("n", over), children);
+
+  it("is true for a closed agent, an archived agent and a finished provider sub-agent", () => {
+    expect(canDismiss(node({ status: "closed" }))).toBe(true);
+    expect(canDismiss(node({ archivedAt: "2026-10-30T01:00:00Z" }))).toBe(true);
+    expect(canDismiss(node({ subagent: true, archivedAt: at(1) }))).toBe(true);
+    expect(canDismiss(node({ subagent: true, status: "idle", archivedAt: null }))).toBe(true);
+  });
+
+  it("is false for a running node", () => {
+    expect(canDismiss(node({ status: "running" }))).toBe(false);
+    expect(canDismiss(node({ status: "running", archivedAt: "2026-10-30T01:00:00Z" }))).toBe(false);
+    expect(canDismiss(node({ subagent: true, status: "running" }))).toBe(false);
+  });
+
+  it("is false for a node with a running descendant", () => {
+    const running = agentNode(agent("r", { status: "running" }));
+    const closed = node({ status: "closed" }, [running]);
+    expect(closed.delegating).toBe(true);
+    expect(canDismiss(closed)).toBe(false);
+  });
+
+  it("is false for a permission or error attention node", () => {
+    expect(canDismiss(node({ status: "closed", requiresAttention: true, attentionReason: "permission" }))).toBe(false);
+    expect(canDismiss(node({ archivedAt: at(1), requiresAttention: true, attentionReason: "error" }))).toBe(false);
+    expect(canDismiss(node({ status: "error" }))).toBe(false);
+  });
+
+  it("is false for a waiting node", () => {
+    const roster = [{ orchestratorWorkspaceId: "wks_a", roles: [{ name: "builder", provider: "codex", model: "m", workspaceId: "wks_a" }] }];
+    const { trees } = buildAgentForest([agent("o", { labels: { "workspace-agents": "orchestrator" } })], ["wks_a"], { showClosed: false, roster });
+    const waiting = trees[0]!.children[0]!;
+    expect(waiting.waiting).toBe(true);
+    expect(canDismiss(waiting)).toBe(false);
+  });
+
+  it("is false for an idle agent that is not closed", () => {
+    expect(canDismiss(node({}))).toBe(false);
+    expect(canDismiss(node({ requiresAttention: true, attentionReason: "finished" }))).toBe(false);
   });
 });

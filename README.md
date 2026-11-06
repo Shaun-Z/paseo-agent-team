@@ -127,6 +127,8 @@ Use the **Density** toggle in the dashboard header, next to **Show closed**, to 
 
 The choice is remembered per tab, like **Show closed**. Glow, arrival flash, signal dots and dashes are scaled to each level's node size.
 
+With **Show closed** on, a closed or archived agent card, or a finished sub-agent card, shows a small × that hides it, together with the agents under it, from that dashboard tab. Cards that are running, need attention (**!**), or have a running agent under them have no ×. The header then shows **Restore hidden (N)**, which brings them all back. Hiding does not delete or archive anything in Paseo. The hidden list is remembered per dashboard tab, like **Show closed**, so the dashboard in a workspace tab and the one in the right sidebar keep separate lists.
+
 ![Agent dashboard in Detailed density shown as a workspace tab, with the Brief | Normal | Detailed toggle in the header set to Detailed: the Orchestrator card on the left and four role agents on the right (release#449D, core#6057, ui#98BC, tester#B223). All four are running, and release and core finish first and show ✓; tester#B223 starts two Explore sub-agents to its right (density 테스트 실행 and messages 테스트 실행)](images/agent-dashboard.gif)
 
 The Agent dashboard can also sit in the right sidebar while you work in the center of the window.
@@ -205,6 +207,7 @@ The plugin's UI follows Paseo's app language. English is the default, and Englis
 - Very long workspace or agent lists are read as a single page. On hosts with a lot of workspaces, an existing workspace could be missed and created again, and the agent dashboard can miss agents beyond that page. Team delete has the same gap: team agents beyond the page are not archived.
 - On Paseo hosts without client navigation, the agent dashboard cards are not pressable.
 - Sub-agents started before the dashboard opened are found in the last 200 timeline items of each unarchived agent in the project. Opening the dashboard reads one such page per agent, so a project with many agents makes many requests.
+- The plugin cannot delete agents. Paseo's plugin API offers only archive (checked up to `@getpaseo/client` 0.15.2), so the dashboard's × can only hide an agent in that tab, and the agent stays in Paseo.
 - A sub-agent found in that window takes its status from the timeline and can read finished while a background sub-agent is still running, until its next activity arrives.
 - In the narrow right sidebar, when the panel is too narrow for the whole tree, the orchestrator card shrinks to its provider icon and model name. If the tree still does not fit, it scrolls horizontally with the scrollbar at the bottom of the panel, so role cards may be off-screen until you scroll.
 
