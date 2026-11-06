@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentNode, buildAgentForest, canDismiss, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
+import { agentNode, buildAgentForest, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
 import { PROVIDER_LOGOS, providerIcon } from "../shared/provider-icons";
 
 const PARENT = "paseo.parent-agent-id";
@@ -777,5 +777,60 @@ describe("canDismiss", () => {
   it("is false for an idle agent that is not closed", () => {
     expect(canDismiss(node({}))).toBe(false);
     expect(canDismiss(node({ requiresAttention: true, attentionReason: "finished" }))).toBe(false);
+  });
+});
+
+describe("dismissibleIds", () => {
+  const scope = ["wks_a"];
+  const LABEL = "workspace-agents";
+  const roster = [{ orchestratorWorkspaceId: "wks_a", roles: [{ name: "builder", provider: "codex", model: "m", workspaceId: "wks_a" }] }];
+  const archivedAt = "2026-10-30T01:00:00Z";
+  const agents = [
+    agent("o", { labels: { [LABEL]: "orchestrator" }, createdAt: at(50) }),
+    agent("p", { createdAt: at(10) }),
+    child("closed", "p", { status: "closed", labels: { role: "c" }, createdAt: at(1) }),
+    child("deep", "closed", { archivedAt, labels: { role: "d" } }),
+    child("sub", "p", { subagent: true, subagentType: "explore", archivedAt, createdAt: at(2) }),
+    child("run", "p", { status: "running", labels: { role: "r" }, createdAt: at(3) }),
+    child("deleg", "p", { status: "closed", labels: { role: "g" }, createdAt: at(4) }),
+    child("deleg-run", "deleg", { status: "running" }),
+    child("attn", "p", { archivedAt, requiresAttention: true, attentionReason: "permission", labels: { role: "a" }, createdAt: at(5) }),
+    child("idle", "p", { labels: { role: "i" }, createdAt: at(6) }),
+    agent("solo-closed", { status: "closed", createdAt: at(20) }),
+    agent("solo-live", { createdAt: at(21) }),
+  ];
+  const forest = buildAgentForest(agents, scope, { showClosed: true, roster });
+
+  it("returns closed, archived and finished sub-agent ids from trees and solo, at any depth", () => {
+    expect(forest.solo.map((node) => node.agent.id)).toContain("solo-closed");
+    expect(dismissibleIds(forest).sort()).toEqual(["closed", "deep", "solo-closed", "sub"]);
+  });
+
+  it("excludes running, delegating, attention, waiting and idle nodes", () => {
+    const result = dismissibleIds(forest);
+    for (const id of ["run", "deleg", "deleg-run", "attn", "idle", "solo-live", "p", "o"]) expect(result).not.toContain(id);
+    expect(result.some((id) => id.startsWith("waiting:"))).toBe(false);
+  });
+
+  it("has no duplicates", () => {
+    const result = dismissibleIds(forest);
+    expect(new Set(result).size).toBe(result.length);
+  });
+
+  it("gives [] for an empty forest", () => {
+    expect(dismissibleIds({ trees: [], solo: [] })).toEqual([]);
+    expect(dismissibleIds(buildAgentForest([], scope, { showClosed: true }))).toEqual([]);
+  });
+
+  it("leaves no dismissible node when the forest is built again with them dismissed and showClosed true", () => {
+    const again = buildAgentForest(agents, scope, { showClosed: true, roster, dismissed: dismissibleIds(forest) });
+    const remaining: string[] = [];
+    const visit = (node: AgentNode) => {
+      if (canDismiss(node)) remaining.push(node.agent.id);
+      node.children.forEach(visit);
+    };
+    [...again.trees, ...again.solo].forEach(visit);
+    expect(remaining).toEqual([]);
+    expect(dismissibleIds(again)).toEqual([]);
   });
 });

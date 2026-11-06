@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { z } from "zod";
 import { withAlpha } from "../shared/color";
-import { buildAgentForest, canDismiss, titleParts, type AgentNode } from "../shared/agent-tree";
+import { buildAgentForest, canDismiss, dismissibleIds, titleParts, type AgentNode } from "../shared/agent-tree";
 import {
   DASHBOARD_DENSITIES,
   DEFAULT_DENSITY,
@@ -1354,6 +1354,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     defaultEfforts,
     roster.data,
   ]);
+  const closedIds = dismissibleIds(forest);
   const icons = useMemo(
     () =>
       new Map(
@@ -1446,6 +1447,10 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
             flexDirection: "row",
             flexWrap: "wrap",
             alignItems: "center",
+            justifyContent: "flex-end",
+            flexShrink: 1,
+            marginLeft: "auto",
+            maxWidth: "100%",
             gap: 12,
           }}
         >
@@ -1531,6 +1536,15 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
           {state.showClosed && state.dismissed.length > 0 ? (
             <Pressable accessibilityRole="button" onPress={() => setState({ ...state, dismissed: [] })} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
               <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("restoreHidden", { count: state.dismissed.length })}</Text>
+            </Pressable>
+          ) : null}
+          {state.showClosed && closedIds.length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setState({ ...state, dismissed: [...new Set([...state.dismissed, ...closedIds])] })}
+              style={{ marginLeft: "auto", paddingHorizontal: 8, paddingVertical: 4 }}
+            >
+              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("hideAllClosed", { count: closedIds.length })}</Text>
             </Pressable>
           ) : null}
         </View>

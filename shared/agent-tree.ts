@@ -73,6 +73,18 @@ export function canDismiss(node: AgentNode): boolean {
     (isHidden(node.agent) || (node.agent.subagent === true && node.agent.status !== "running"));
 }
 
+/** Dismissible sessions in depth-first tree order, followed by solo trees, without duplicate ids. */
+export function dismissibleIds(forest: AgentForest): string[] {
+  const ids = new Set<string>();
+  const visit = (node: AgentNode) => {
+    if (canDismiss(node)) ids.add(node.agent.id);
+    node.children.forEach(visit);
+  };
+  forest.trees.forEach(visit);
+  forest.solo.forEach(visit);
+  return [...ids];
+}
+
 function kindOf(agent: DashboardAgent): AgentKind {
   if (agent.subagent) return "subagent";
   const job = agent.labels[LABEL];
