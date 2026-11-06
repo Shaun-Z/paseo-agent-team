@@ -14,6 +14,12 @@ import {
 } from "react-native";
 import { z } from "zod";
 import { buildAgentForest, type AgentNode } from "../shared/agent-tree";
+import {
+  DASHBOARD_DENSITIES,
+  DEFAULT_DENSITY,
+  densityLayout,
+  type DashboardDensityLayout,
+} from "../shared/dashboard-density";
 import { providerIcon } from "../shared/provider-icons";
 import { teamRosterRpc } from "../shared/rpc";
 import {
@@ -28,14 +34,18 @@ import { messages } from "./i18n";
 const RED = "#ff5a5f";
 const GLOW = "#ff9a9d";
 const AMBER = "#ffb347";
-const stateSchema = z.object({ showClosed: z.boolean() });
-const DEFAULT_STATE = { showClosed: false };
+const stateSchema = z.object({
+  showClosed: z.boolean(),
+  density: z.enum(DASHBOARD_DENSITIES).catch(DEFAULT_DENSITY),
+});
+const DEFAULT_STATE = { showClosed: false, density: DEFAULT_DENSITY };
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
 type TreeProps = {
   node: AgentNode;
   colors: Colors;
   compact: boolean;
+  layout: DashboardDensityLayout;
   icons: Map<string, string | undefined>;
   flow: Animated.Value;
   glow: Animated.Value;
@@ -44,7 +54,15 @@ type TreeProps = {
   open?: (id: string) => void;
   caption: (node: AgentNode) => string;
   waitingLabel: string;
+  subagentLabel: (count: number) => string;
+  expandedSubagents: Record<string, boolean>;
+  toggleSubagents: (id: string) => void;
 };
+
+function shortModel(model: string): string {
+  const base = (model.split("/").pop() ?? model).replace(/-\d{8}$/, "");
+  return base.replace(/^claude-/, "");
+}
 
 function Logo({
   node,
@@ -61,6 +79,7 @@ function Logo({
     node.agent.provider,
     icons.get(node.agent.provider),
   );
+  const svgSize = size >= 24 ? size - 10 : Math.max(9, size - 5);
   return (
     <View
       style={{
@@ -75,7 +94,7 @@ function Logo({
       {icon.kind === "svg" ? (
         <Icon
           icon={{ svg: icon.svg }}
-          size={size - 10}
+          size={svgSize}
           color={colors.foreground}
         />
       ) : (
@@ -98,23 +117,30 @@ function Badge({
   colors,
   flow,
   waitingLabel,
-}: Pick<TreeProps, "node" | "colors" | "flow" | "waitingLabel">) {
+  layout,
+}: Pick<TreeProps, "node" | "colors" | "flow" | "waitingLabel" | "layout">) {
   if (node.waiting)
     return (
       <Text
-        style={{ color: colors.foregroundMuted, fontSize: 9, fontWeight: "700" }}
+        style={{
+          color: colors.foregroundMuted,
+          fontSize: layout.captionFontSize,
+          lineHeight: layout.autoWidth ? 12 : undefined,
+          fontWeight: "700",
+        }}
       >
         {waitingLabel}
       </Text>
     );
   if (!node.badge) return null;
-  if (node.badge === "running")
+  if (node.badge === "running") {
+    const dotSize = layout.showChips ? 8 : layout.autoWidth ? 6 : 7;
     return (
       <Animated.View
         style={{
-          width: 8,
-          height: 8,
-          borderRadius: 4,
+          width: dotSize,
+          height: dotSize,
+          borderRadius: dotSize / 2,
           backgroundColor: AMBER,
           opacity: flow.interpolate({
             inputRange: [0, 0.5, 1],
@@ -123,12 +149,16 @@ function Badge({
         }}
       />
     );
+  }
+  const badgeSize = layout.showChips ? 17 : layout.autoWidth ? 13 : 15;
+  const badgeFontSize = layout.showChips ? 11 : layout.autoWidth ? 9 : 10;
+  const badgeLineHeight = layout.showChips ? 14 : layout.autoWidth ? 11 : 12;
   return (
     <View
       style={{
-        width: 17,
-        height: 17,
-        borderRadius: 9,
+        width: badgeSize,
+        height: badgeSize,
+        borderRadius: Math.ceil(badgeSize / 2),
         backgroundColor:
           node.badge === "attention" ? RED : colors.statusSuccess,
         alignItems: "center",
@@ -138,9 +168,9 @@ function Badge({
       <Text
         style={{
           color: colors.accentForeground,
-          fontSize: 11,
+          fontSize: badgeFontSize,
           fontWeight: "800",
-          lineHeight: 14,
+          lineHeight: badgeLineHeight,
         }}
       >
         {node.badge === "attention" ? "!" : "✓"}
@@ -149,11 +179,21 @@ function Badge({
   );
 }
 
-function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
+function Card(
+  props: TreeProps & {
+    root?: boolean;
+    collapseRoot?: boolean;
+    subagentCount?: number;
+    subagentCountLabel?: string;
+    subagentsExpanded?: boolean;
+    onToggleSubagents?: () => void;
+  },
+) {
   const {
     node,
     colors,
     compact,
+    layout,
     open,
     caption,
     flow,
@@ -163,17 +203,197 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
     collapseRoot,
     phase,
     waitingLabel,
+    subagentCount = 0,
+    subagentCountLabel,
+    subagentsExpanded = false,
+    onToggleSubagents,
   } = props;
   const collapsed = Boolean(root && collapseRoot);
-  const content = collapsed ? (
+  const subagentPill =
+    !collapsed && subagentCount > 0 && onToggleSubagents ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={subagentCountLabel}
+        accessibilityState={{ expanded: subagentsExpanded }}
+        onPress={onToggleSubagents}
+        style={{
+          backgroundColor: subagentsExpanded ? colors.accent : colors.surface2,
+          borderRadius: 6,
+          paddingHorizontal: 4,
+          paddingVertical: 1,
+          borderWidth: 1,
+          borderColor: colors.accent,
+        }}
+      >
+        <Text
+          style={{
+            color: subagentsExpanded ? colors.accentForeground : colors.accent,
+            fontSize: layout.captionFontSize,
+            lineHeight: 11,
+            fontWeight: "700",
+          }}
+        >
+          +{subagentCount}
+        </Text>
+      </Pressable>
+    ) : null;
+
+  const briefLabel = node.role || node.title;
+  const briefBadgeSpace = node.waiting
+    ? 42
+    : node.badge === "running"
+      ? 10
+      : node.badge
+        ? 17
+        : 0;
+  const briefTitleMaxWidth =
+    layout.maxWidth -
+    (layout.padding + 2) * 2 -
+    2 -
+    layout.logoSize -
+    layout.gap -
+    briefBadgeSpace;
+  const showBriefModel = Boolean(node.model && briefLabel.length < 11);
+
+  const content = layout.autoWidth ? (
+    collapsed ? (
+      <>
+        <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
+        <Badge
+          node={node}
+          colors={colors}
+          flow={flow}
+          waitingLabel={waitingLabel}
+          layout={layout}
+        />
+      </>
+    ) : (
+      <>
+        <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
+        <Text
+          numberOfLines={1}
+          style={{
+            flexShrink: 0,
+            maxWidth: briefTitleMaxWidth,
+            color: colors.foreground,
+            fontSize: layout.titleFontSize,
+            lineHeight: 14,
+            fontWeight: "700",
+          }}
+        >
+          {briefLabel}
+        </Text>
+        {showBriefModel && node.model ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              flexShrink: 1,
+              minWidth: 0,
+              color: colors.foregroundMuted,
+              fontSize: layout.captionFontSize,
+              lineHeight: 12,
+            }}
+          >
+            {shortModel(node.model)}
+          </Text>
+        ) : null}
+        <View style={{ flexShrink: 0 }}>
+          <Badge
+            node={node}
+            colors={colors}
+            flow={flow}
+            waitingLabel={waitingLabel}
+            layout={layout}
+          />
+        </View>
+      </>
+    )
+  ) : !layout.showChips ? (
+    collapsed ? (
+      <>
+        <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
+        {node.model ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              color: colors.foregroundMuted,
+              fontSize: layout.captionFontSize,
+              textAlign: "center",
+              maxWidth: "100%",
+            }}
+          >
+            {shortModel(node.model)}
+          </Text>
+        ) : null}
+        <View style={{ position: "absolute", right: 4, top: 4 }}>
+          <Badge
+            node={node}
+            colors={colors}
+            flow={flow}
+            waitingLabel={waitingLabel}
+            layout={layout}
+          />
+        </View>
+      </>
+    ) : (
+      <>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: layout.gap,
+          }}
+        >
+          <Logo
+            node={node}
+            icons={icons}
+            colors={colors}
+            size={layout.logoSize}
+          />
+          <Text
+            numberOfLines={1}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              color: colors.foreground,
+              fontSize: layout.titleFontSize,
+              fontWeight: "700",
+            }}
+          >
+            {node.title}
+          </Text>
+          <Badge
+            node={node}
+            colors={colors}
+            flow={flow}
+            waitingLabel={waitingLabel}
+            layout={layout}
+          />
+        </View>
+        {[node.model, layout.showMode ? node.mode : null].some(Boolean) ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              color: colors.foregroundMuted,
+              fontSize: layout.captionFontSize,
+            }}
+          >
+            {[node.model, layout.showMode ? node.mode : null]
+              .filter(Boolean)
+              .join(" · ")}
+          </Text>
+        ) : null}
+      </>
+    )
+  ) : collapsed ? (
     <>
-      <Logo node={node} icons={icons} colors={colors} size={26} />
+      <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
       {node.model ? (
         <Text
           numberOfLines={2}
           style={{
             color: colors.foregroundMuted,
-            fontSize: 9,
+            fontSize: layout.captionFontSize,
             textAlign: "center",
             maxWidth: "100%",
           }}
@@ -187,29 +407,36 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
           colors={colors}
           flow={flow}
           waitingLabel={waitingLabel}
+          layout={layout}
         />
       </View>
     </>
   ) : (
     <>
-      <Logo node={node} icons={icons} colors={colors} size={26} />
+      <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        {layout.showCaption ? (
+          <Text
+            numberOfLines={1}
+            style={{
+              color: colors.foregroundMuted,
+              fontSize: layout.captionFontSize,
+              fontWeight: "700",
+              letterSpacing: 0.8,
+              textTransform: "uppercase",
+              paddingRight: 18,
+            }}
+          >
+            {caption(node)}
+          </Text>
+        ) : null}
         <Text
           numberOfLines={1}
           style={{
-            color: colors.foregroundMuted,
-            fontSize: 9,
+            color: colors.foreground,
+            fontSize: layout.titleFontSize,
             fontWeight: "700",
-            letterSpacing: 0.8,
-            textTransform: "uppercase",
-            paddingRight: 18,
           }}
-        >
-          {caption(node)}
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={{ color: colors.foreground, fontSize: 13, fontWeight: "700" }}
         >
           {node.title}
         </Text>
@@ -221,7 +448,11 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
             marginTop: 3,
           }}
         >
-          {[node.model, node.effort, node.mode].map((chip, i) =>
+          {[
+            node.model,
+            layout.showEffort ? node.effort : null,
+            layout.showMode ? node.mode : null,
+          ].map((chip, i) =>
             chip ? (
               <View
                 key={i}
@@ -240,10 +471,10 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
                   numberOfLines={1}
                   style={{
                     color: i === 2 ? colors.accent : colors.foregroundMuted,
-                    fontSize: 9,
+                    fontSize: layout.captionFontSize,
                   }}
                 >
-                {chip}
+                  {chip}
                 </Text>
               </View>
             ) : null,
@@ -256,27 +487,65 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
           colors={colors}
           flow={flow}
           waitingLabel={waitingLabel}
+          layout={layout}
         />
       </View>
     </>
   );
+
+  const fixedWidth = collapsed
+    ? layout.collapsedRootWidth
+    : compact
+      ? root
+        ? layout.rootWidth.compact
+        : layout.childWidth.compact
+      : root
+        ? layout.rootWidth.regular
+        : layout.childWidth.regular;
+
   const style = {
-    width: collapsed
-      ? COLLAPSED_ROOT_WIDTH
-      : compact
-        ? root
-          ? ROOT_WIDTH.compact
-          : CHILD_WIDTH.compact
-        : root
-          ? ROOT_WIDTH.regular
-          : CHILD_WIDTH.regular,
-    minHeight: 76,
-    padding: collapsed ? 8 : 10,
-    flexDirection: collapsed ? ("column" as const) : ("row" as const),
-    alignItems: collapsed ? ("center" as const) : undefined,
-    justifyContent: collapsed ? ("center" as const) : undefined,
-    gap: collapsed ? 6 : 9,
+    ...(layout.autoWidth && !collapsed
+      ? {
+          minWidth: layout.minWidth,
+          maxWidth: layout.maxWidth,
+          paddingHorizontal: layout.padding + 2,
+          paddingVertical: layout.paddingVertical,
+        }
+      : {
+          width: fixedWidth,
+          paddingHorizontal: collapsed
+            ? layout.collapsedPadding
+            : layout.padding,
+          paddingVertical: collapsed
+            ? layout.collapsedPadding
+            : layout.paddingVertical,
+        }),
+    minHeight: layout.minHeight,
+    flexDirection: layout.autoWidth
+      ? ("row" as const)
+      : collapsed
+        ? ("column" as const)
+        : layout.showChips
+          ? ("row" as const)
+          : ("column" as const),
+    alignItems: layout.autoWidth
+      ? ("center" as const)
+      : collapsed
+        ? ("center" as const)
+        : undefined,
+    justifyContent: collapsed
+      ? ("center" as const)
+      : !layout.autoWidth && !layout.showChips
+        ? ("center" as const)
+        : undefined,
+    gap: collapsed
+      ? layout.collapsedGap
+      : !layout.autoWidth && !layout.showChips
+        ? 3
+        : layout.gap,
     borderWidth: 1,
+    borderStyle:
+      !layout.showChips && node.waiting ? ("dashed" as const) : undefined,
     borderColor: node.live
       ? RED
       : node.delegating
@@ -284,41 +553,53 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
         : root
           ? colors.accent
           : colors.border,
-    borderRadius: 12,
+    borderRadius: layout.borderRadius,
     backgroundColor: colors.surface1,
     shadowColor: RED,
-    shadowOpacity: node.live ? 0.125 : 0,
-    shadowRadius: 10,
+    shadowOpacity: node.live ? layout.glowOpacity : 0,
+    shadowRadius: layout.glowRadius,
     shadowOffset: { width: 0, height: 0 },
     // A role with no session yet: dimmed, and nothing to open.
     opacity: node.waiting ? 0.45 : node.kind === "subagent" ? 0.85 : 1,
   };
-  const card = open && !node.waiting && node.kind !== "subagent" ? (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={node.title}
-      onPress={() => open(node.agent.id)}
-      style={style}
-    >
-      {content}
-    </Pressable>
-  ) : (
-    <View accessibilityLabel={node.title} style={style}>
-      {content}
-    </View>
-  );
-  if (!node.live) return card;
+  const card =
+    open && !node.waiting && node.kind !== "subagent" ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={node.title}
+        onPress={() => open(node.agent.id)}
+        style={style}
+      >
+        {content}
+      </Pressable>
+    ) : (
+      <View accessibilityLabel={node.title} style={style}>
+        {content}
+      </View>
+    );
+  if (!node.live) {
+    return subagentPill ? (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        {card}
+        {subagentPill}
+      </View>
+    ) : (
+      card
+    );
+  }
+  const peak = (layout.arrival + 1) / 2;
   const ping =
     phase?.interpolate({
-      inputRange: [0, 0.84, 0.92, 1],
-      outputRange: [1, 1, 1.03, 1],
+      inputRange: [0, layout.arrival, peak, 1],
+      outputRange: [1, 1, layout.arrivalFlash.scale, 1],
     }) ?? 1;
   const flash =
     phase?.interpolate({
-      inputRange: [0, 0.84, 0.92, 1],
-      outputRange: [0, 0, 0.225, 0],
+      inputRange: [0, layout.arrival, peak, 1],
+      outputRange: [0, 0, layout.arrivalFlash.opacity, 0],
     }) ?? 0;
-  return (
+  const flashInset = layout.autoWidth ? -1 : -2;
+  const liveCard = (
     <Animated.View style={{ transform: [{ scale: ping }] }}>
       <Animated.View
         pointerEvents="none"
@@ -328,24 +609,27 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
           bottom: -1,
           left: -1,
           right: -1,
-          borderRadius: 12,
+          borderRadius: layout.borderRadius,
           borderWidth: 1,
           borderColor: GLOW,
           backgroundColor: GLOW,
           shadowColor: GLOW,
-          shadowOpacity: 0.225,
-          shadowRadius: 6,
+          shadowOpacity: layout.arrivalFlash.opacity,
+          shadowRadius: Math.max(2, layout.glowRadius * 0.6),
           shadowOffset: { width: 0, height: 0 },
           elevation: 4,
           opacity: glow.interpolate({
             inputRange: [0, 1],
-            outputRange: [0.04, 0.16],
+            outputRange: [layout.glowOpacity * 0.32, layout.glowOpacity * 1.28],
           }),
           transform: [
             {
               scale: glow.interpolate({
                 inputRange: [0, 1],
-                outputRange: [1, 1.02],
+                outputRange: [
+                  1,
+                  1 + (layout.arrivalFlash.scale - 1) * (2 / 3),
+                ],
               }),
             },
           ],
@@ -355,15 +639,15 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
         pointerEvents="none"
         style={{
           position: "absolute",
-          top: -2,
-          bottom: -2,
-          left: -2,
-          right: -2,
-          borderRadius: 12,
+          top: flashInset,
+          bottom: flashInset,
+          left: flashInset,
+          right: flashInset,
+          borderRadius: layout.borderRadius,
           backgroundColor: GLOW,
           shadowColor: GLOW,
-          shadowOpacity: 0.7,
-          shadowRadius: 14,
+          shadowOpacity: Math.min(1, layout.glowOpacity * 5.6),
+          shadowRadius: layout.glowRadius * 1.4,
           elevation: 8,
           opacity: flash,
         }}
@@ -371,22 +655,33 @@ function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
       {card}
     </Animated.View>
   );
+  return subagentPill ? (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      {liveCard}
+      {subagentPill}
+    </View>
+  ) : (
+    liveCard
+  );
 }
 
 function Dashes({
   flow,
+  layout,
   vertical = false,
   reverse = false,
 }: {
   flow: Animated.Value;
+  layout: DashboardDensityLayout;
   vertical?: boolean;
   reverse?: boolean;
 }) {
   const [length, setLength] = useState(0);
-  const count = Math.ceil(length / 12) + 2;
+  const step = layout.dashLength + layout.dashGap;
+  const count = Math.ceil(length / step) + 2;
   const offset = flow.interpolate({
     inputRange: [0, 1],
-    outputRange: reverse ? [12, 0] : [0, 12],
+    outputRange: reverse ? [step, 0] : [0, step],
   });
   return (
     <View
@@ -404,7 +699,7 @@ function Dashes({
         style={{
           position: "absolute",
           flexDirection: vertical ? "column" : "row",
-          ...(vertical ? { top: -12 } : { left: -12 }),
+          ...(vertical ? { top: -step } : { left: -step }),
           transform: [
             vertical ? { translateY: offset } : { translateX: offset },
           ],
@@ -414,10 +709,10 @@ function Dashes({
           <View
             key={i}
             style={{
-              width: vertical ? 2 : 6,
-              height: vertical ? 6 : 2,
-              marginBottom: vertical ? 6 : 0,
-              marginRight: vertical ? 0 : 6,
+              width: vertical ? 2 : layout.dashLength,
+              height: vertical ? layout.dashLength : 2,
+              marginBottom: vertical ? layout.dashGap : 0,
+              marginRight: vertical ? 0 : layout.dashGap,
               backgroundColor: RED,
             }}
           />
@@ -427,23 +722,45 @@ function Dashes({
   );
 }
 
-const ROOT_WIDTH = { compact: 205, regular: 240 };
-const CHILD_WIDTH = { compact: 185, regular: 220 };
-const COLLAPSED_ROOT_WIDTH = 84;
 const TREE_PAD_X = 16;
-const STEM = 20;
-const BRANCH = 24;
-const ARRIVAL = 0.84;
 
-function treeDepth(node: AgentNode): number {
-  if (!node.children.length) return 0;
-  return 1 + Math.max(...node.children.map(treeDepth));
+function treeDepth(
+  node: AgentNode,
+  collapseSubagents: boolean,
+  expandedSubagents: Record<string, boolean>,
+): number {
+  const children =
+    collapseSubagents && !expandedSubagents[node.agent.id]
+      ? node.children.filter((child) => child.kind !== "subagent")
+      : node.children;
+  if (!children.length) return 0;
+  return (
+    1 +
+    Math.max(
+      ...children.map((child) =>
+        treeDepth(child, collapseSubagents, expandedSubagents),
+      ),
+    )
+  );
 }
 
-function expandedTreeWidth(node: AgentNode, compact: boolean): number {
-  const rootWidth = compact ? ROOT_WIDTH.compact : ROOT_WIDTH.regular;
-  const childWidth = compact ? CHILD_WIDTH.compact : CHILD_WIDTH.regular;
-  return rootWidth + treeDepth(node) * (STEM + BRANCH + childWidth);
+function expandedTreeWidth(
+  node: AgentNode,
+  compact: boolean,
+  layout: DashboardDensityLayout,
+  expandedSubagents: Record<string, boolean>,
+): number {
+  const rootWidth = compact
+    ? layout.rootWidth.compact
+    : layout.rootWidth.regular;
+  const childWidth = compact
+    ? layout.childWidth.compact
+    : layout.childWidth.regular;
+  return (
+    rootWidth +
+    treeDepth(node, layout.collapseSubagents, expandedSubagents) *
+      (layout.stem + layout.branch + childWidth)
+  );
 }
 
 function CommandPacket({
@@ -451,42 +768,46 @@ function CommandPacket({
   junction,
   center,
   colors,
+  layout,
 }: {
   phase: Animated.AnimatedModulo<number>;
   junction: number;
   center: number;
   colors: Colors;
+  layout: DashboardDensityLayout;
 }) {
-  const distance = STEM + Math.abs(center - junction) + BRANCH;
-  const first = (ARRIVAL * STEM) / distance;
-  const second = (ARRIVAL * (STEM + Math.abs(center - junction))) / distance;
+  const { stem, branch, arrival, signalDotSize, glowRadius } = layout;
+  const distance = stem + Math.abs(center - junction) + branch;
+  const first = (arrival * stem) / distance;
+  const second = (arrival * (stem + Math.abs(center - junction))) / distance;
   const input =
-    second > first ? [0, first, second, ARRIVAL, 1] : [0, first, ARRIVAL, 1];
+    second > first ? [0, first, second, arrival, 1] : [0, first, arrival, 1];
   const x =
     second > first
-      ? [0, STEM, STEM, STEM + BRANCH, STEM + BRANCH]
-      : [0, STEM, STEM + BRANCH, STEM + BRANCH];
+      ? [0, stem, stem, stem + branch, stem + branch]
+      : [0, stem, stem + branch, stem + branch];
   const y =
     second > first
       ? [junction, junction, center, center, center]
       : [junction, junction, center, center];
+  const half = Math.floor(signalDotSize / 2);
   return (
     <Animated.View
       style={{
         position: "absolute",
-        left: -3,
-        top: -3,
-        width: 7,
-        height: 7,
-        borderRadius: 4,
+        left: -half,
+        top: -half,
+        width: signalDotSize,
+        height: signalDotSize,
+        borderRadius: Math.ceil(signalDotSize / 2),
         backgroundColor: colors.foreground,
         shadowColor: RED,
         shadowOpacity: 1,
-        shadowRadius: 6,
+        shadowRadius: Math.max(2, Math.round(glowRadius * 0.6)),
         shadowOffset: { width: 0, height: 0 },
         elevation: 5,
         opacity: phase.interpolate({
-          inputRange: [0, 0.02, ARRIVAL, ARRIVAL + 0.01, 1],
+          inputRange: [0, 0.02, arrival, arrival + 0.01, 1],
           outputRange: [0, 1, 1, 0, 0],
         }),
         transform: [
@@ -511,6 +832,7 @@ function CommandPacket({
 function Connector({
   colors,
   flow,
+  layout,
   junction,
   children,
   centers,
@@ -518,11 +840,13 @@ function Connector({
 }: {
   colors: Colors;
   flow: Animated.Value;
+  layout: DashboardDensityLayout;
   junction: number;
   children: AgentNode[];
   centers: Record<string, number>;
   phases: Record<string, Animated.AnimatedModulo<number>>;
 }) {
+  const { stem, branch } = layout;
   const positioned = children.filter(
     (child) => centers[child.agent.id] !== undefined,
   );
@@ -538,14 +862,14 @@ function Connector({
         left: 0,
         top: 0,
         bottom: 0,
-        width: STEM + BRANCH,
+        width: stem + branch,
       }}
     >
       {max > min && (
         <View
           style={{
             position: "absolute",
-            left: STEM,
+            left: stem,
             top: min + 8,
             height: Math.max(0, max - min - 16),
             borderLeftWidth: 1,
@@ -564,10 +888,10 @@ function Connector({
             key={child.agent.id}
             style={{
               position: "absolute",
-              left: STEM,
+              left: stem,
               top: 0,
               bottom: 0,
-              width: BRANCH,
+              width: branch,
             }}
           >
             {straight ? (
@@ -611,7 +935,7 @@ function Connector({
                       width: 2,
                     }}
                   >
-                    <Dashes flow={flow} vertical reverse={above} />
+                    <Dashes flow={flow} layout={layout} vertical reverse={above} />
                   </View>
                 )}
                 <View
@@ -623,7 +947,7 @@ function Connector({
                     height: 2,
                   }}
                 >
-                  <Dashes flow={flow} />
+                  <Dashes flow={flow} layout={layout} />
                 </View>
               </>
             )}
@@ -636,11 +960,11 @@ function Connector({
             position: "absolute",
             left: 0,
             top: junction,
-            width: STEM,
+            width: stem,
             height: 2,
           }}
         >
-          <Dashes flow={flow} />
+          <Dashes flow={flow} layout={layout} />
         </View>
       )}
       {positioned
@@ -652,6 +976,7 @@ function Connector({
             junction={junction}
             center={centers[child.agent.id]!}
             colors={colors}
+            layout={layout}
           />
         ))}
     </View>
@@ -659,22 +984,44 @@ function Connector({
 }
 
 function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
-  const { node, colors, flow, packet } = props;
+  const {
+    node,
+    colors,
+    flow,
+    packet,
+    layout,
+    subagentLabel,
+    expandedSubagents,
+    toggleSubagents,
+  } = props;
+  const subagents = useMemo(
+    () => node.children.filter((child) => child.kind === "subagent"),
+    [node.children],
+  );
+  const collapseSubagents = layout.collapseSubagents && subagents.length > 0;
+  const subagentsExpanded = Boolean(expandedSubagents[node.agent.id]);
+  const visibleChildren = useMemo(
+    () =>
+      collapseSubagents && !subagentsExpanded
+        ? node.children.filter((child) => child.kind !== "subagent")
+        : node.children,
+    [collapseSubagents, subagentsExpanded, node.children],
+  );
   const [height, setHeight] = useState(0);
   const [heights, setHeights] = useState<Record<string, number>>({});
   useEffect(() => {
-    const ids = new Set(node.children.map((child) => child.agent.id));
+    const ids = new Set(visibleChildren.map((child) => child.agent.id));
     setHeights((previous) => {
       const entries = Object.entries(previous).filter(([id]) => ids.has(id));
       return entries.length === Object.keys(previous).length
         ? previous
         : Object.fromEntries(entries);
     });
-  }, [node.children]);
+  }, [visibleChildren]);
   const centers: Record<string, number> = {};
   let offset = 0;
   let measured = true;
-  for (const child of node.children) {
+  for (const child of visibleChildren) {
     const rowHeight = heights[child.agent.id];
     if (rowHeight === undefined) measured = false;
     if (measured && rowHeight !== undefined) {
@@ -682,7 +1029,9 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
       offset += rowHeight;
     }
   }
-  const childKey = JSON.stringify(node.children.map((child) => child.agent.id));
+  const childKey = JSON.stringify(
+    visibleChildren.map((child) => child.agent.id),
+  );
   const phases = useMemo(() => {
     const ids: string[] = JSON.parse(childKey);
     return Object.fromEntries(
@@ -695,10 +1044,21 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
       ]),
     );
   }, [childKey, packet]);
+  const rowPadY = layout.autoWidth ? 3 : layout.showChips ? 6 : 4;
   return (
     <View style={{ flexDirection: "row", alignItems: "center" }}>
-      <Card {...props} />
-      {node.children.length > 0 && (
+      <Card
+        {...props}
+        subagentCount={collapseSubagents ? subagents.length : 0}
+        subagentCountLabel={
+          collapseSubagents ? subagentLabel(subagents.length) : undefined
+        }
+        subagentsExpanded={subagentsExpanded}
+        onToggleSubagents={
+          collapseSubagents ? () => toggleSubagents(node.agent.id) : undefined
+        }
+      />
+      {visibleChildren.length > 0 && (
         <View onLayout={(event) => setHeight(event.nativeEvent.layout.height)}>
           <View
             pointerEvents="none"
@@ -706,7 +1066,7 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
               position: "absolute",
               left: 0,
               top: "50%",
-              width: STEM,
+              width: layout.stem,
               height: 1,
               backgroundColor: colors.border,
             }}
@@ -714,12 +1074,13 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
           <Connector
             colors={colors}
             flow={flow}
+            layout={layout}
             junction={height / 2}
-            children={node.children}
+            children={visibleChildren}
             centers={centers}
             phases={phases}
           />
-          {node.children.map((child) => (
+          {visibleChildren.map((child) => (
             <View
               key={child.agent.id}
               onLayout={(event) => {
@@ -730,7 +1091,10 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
                     : { ...previous, [child.agent.id]: rowHeight },
                 );
               }}
-              style={{ paddingLeft: STEM + BRANCH, paddingVertical: 6 }}
+              style={{
+                paddingLeft: layout.stem + layout.branch,
+                paddingVertical: rowPadY,
+              }}
             >
               <Tree
                 {...props}
@@ -982,20 +1346,35 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
   const colors = props.theme.colors;
   const pad = props.layout.compact ? 16 : 24;
   const [panelWidth, setPanelWidth] = useState(0);
+  const [expandedSubagents, setExpandedSubagents] = useState<
+    Record<string, boolean>
+  >({});
+  const toggleSubagents = (id: string) =>
+    setExpandedSubagents((current) => ({ ...current, [id]: !current[id] }));
+  const layout = useMemo(() => densityLayout(state.density), [state.density]);
   const widestTree = useMemo(
     () =>
       forest.trees.reduce(
         (max, node) =>
-          Math.max(max, expandedTreeWidth(node, props.layout.compact)),
+          Math.max(
+            max,
+            expandedTreeWidth(
+              node,
+              props.layout.compact,
+              layout,
+              expandedSubagents,
+            ),
+          ),
         0,
       ),
-    [forest.trees, props.layout.compact],
+    [forest.trees, props.layout.compact, layout, expandedSubagents],
   );
   const collapseRoot =
     panelWidth > 0 && widestTree > panelWidth - (pad + TREE_PAD_X) * 2;
   const treeProps = {
     colors,
     compact: props.layout.compact,
+    layout,
     icons,
     flow,
     glow,
@@ -1015,6 +1394,9 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
               : t("subagent")
             : node.agent.provider),
     waitingLabel: t("waiting"),
+    subagentLabel: (count: number) => t("subagentCount", { count }),
+    expandedSubagents,
+    toggleSubagents,
   };
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
@@ -1028,6 +1410,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
           borderBottomWidth: 1,
           borderColor: colors.border,
           flexDirection: "row",
+          flexWrap: "wrap",
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
@@ -1038,40 +1421,94 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
         >
           {t("dashboardTitle")}
         </Text>
-        <Pressable
-          accessibilityRole="switch"
-          accessibilityState={{ checked: state.showClosed }}
-          onPress={() => setState({ showClosed: !state.showClosed })}
-          style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 12,
+          }}
         >
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-            {t("showClosed")}
-          </Text>
           <View
+            accessibilityLabel={t("density.label")}
             style={{
-              width: 32,
-              height: 18,
-              borderRadius: 9,
-              backgroundColor: state.showClosed
-                ? colors.accent
-                : colors.surface2,
-              justifyContent: "center",
-              paddingHorizontal: 2,
+              flexDirection: "row",
+              alignItems: "center",
+              backgroundColor: colors.surface1,
+              borderRadius: 7,
+              borderWidth: 1,
+              borderColor: colors.border,
+              padding: 2,
+              gap: 2,
             }}
           >
+            {DASHBOARD_DENSITIES.map((option) => {
+              const selected = state.density === option;
+              const label = t(`density.${option}`);
+              return (
+                <Pressable
+                  key={option}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t("density.label")}: ${label}`}
+                  accessibilityState={{ selected }}
+                  onPress={() => setState({ ...state, density: option })}
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 5,
+                    backgroundColor: selected ? colors.accent : "transparent",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: selected
+                        ? colors.accentForeground
+                        : colors.foregroundMuted,
+                      fontSize: 11,
+                      fontWeight: selected ? "700" : "500",
+                    }}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: state.showClosed }}
+            onPress={() => setState({ ...state, showClosed: !state.showClosed })}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+          >
+            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+              {t("showClosed")}
+            </Text>
             <View
               style={{
-                width: 14,
-                height: 14,
-                borderRadius: 7,
+                width: 32,
+                height: 18,
+                borderRadius: 9,
                 backgroundColor: state.showClosed
-                  ? colors.accentForeground
-                  : colors.foregroundMuted,
-                alignSelf: state.showClosed ? "flex-end" : "flex-start",
+                  ? colors.accent
+                  : colors.surface2,
+                justifyContent: "center",
+                paddingHorizontal: 2,
               }}
-            />
-          </View>
-        </Pressable>
+            >
+              <View
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: 7,
+                  backgroundColor: state.showClosed
+                    ? colors.accentForeground
+                    : colors.foregroundMuted,
+                  alignSelf: state.showClosed ? "flex-end" : "flex-start",
+                }}
+              />
+            </View>
+          </Pressable>
+        </View>
       </View>
       <ScrollView
         horizontal

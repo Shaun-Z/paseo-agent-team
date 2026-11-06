@@ -1,6 +1,9 @@
 // UI text. English is the default; Paseo picks the resource for the app's language.
 
 export const en = {
+  density: { label: "Density", brief: "Brief", normal: "Normal", detailed: "Detailed" },
+  subagentCount_one: "{{count}} sub-agent",
+  subagentCount_other: "{{count}} sub-agents",
   dashboardTitle: "Agent dashboard",
   showClosed: "Show closed",
   soloAgents: "Solo agents",
@@ -101,6 +104,9 @@ export const en = {
 type Shape<T> = { readonly [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };
 
 export const ko: Shape<typeof en> = {
+  density: { label: "밀도", brief: "간략", normal: "보통", detailed: "자세히" },
+  subagentCount_one: "하위 에이전트 {{count}}개",
+  subagentCount_other: "하위 에이전트 {{count}}개",
   dashboardTitle: "에이전트 대시보드",
   showClosed: "닫힌 에이전트 표시",
   soloAgents: "단독 에이전트",
@@ -199,6 +205,9 @@ export const ko: Shape<typeof en> = {
 };
 
 export const ja: Shape<typeof en> = {
+  density: { label: "表示密度", brief: "簡略", normal: "標準", detailed: "詳細" },
+  subagentCount_one: "サブエージェント {{count}}件",
+  subagentCount_other: "サブエージェント {{count}}件",
   dashboardTitle: "エージェントダッシュボード",
   showClosed: "終了したエージェントを表示",
   soloAgents: "単独エージェント",
@@ -297,6 +306,9 @@ export const ja: Shape<typeof en> = {
 };
 
 export const zh: Shape<typeof en> = {
+  density: { label: "密度", brief: "简略", normal: "标准", detailed: "详细" },
+  subagentCount_one: "{{count}} 个子智能体",
+  subagentCount_other: "{{count}} 个子智能体",
   dashboardTitle: "智能体仪表盘",
   showClosed: "显示已关闭的智能体",
   soloAgents: "独立智能体",

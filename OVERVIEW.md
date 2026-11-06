@@ -91,11 +91,19 @@ Workspace B panel → team B (.agents/teams/b.json) → orchestrator in B
 
 The **Agent dashboard** panel (**에이전트 대시보드** in Korean) opens as a workspace tab or in the right sidebar next to Files and Changes. It shows the project's agents as a tree.
 
+Use the **Density** toggle in the dashboard header, next to **Show closed**, to choose one of three levels. **Normal** is the default.
+
+- **Brief**: a one-line pill with the provider logo, the role or title, a short model name and the status.
+- **Normal**: a two-line card, 150px wide (140px in a narrow panel), with the logo, title and status, then `model · mode`.
+- **Detailed**: the full card with caption, model, effort and mode chips, described below.
+
+The choice is remembered per tab, like **Show closed**. Glow, arrival flash, signal dots and dashes are scaled to each level's node size.
+
 - An agent started by another agent appears under that agent. Role agents started by the orchestrator sit under it.
 - Agents with no parent are roots. Roots without children are listed under **Solo agents**.
 - Roles of the team that have not been started yet appear under the newest orchestrator of the team's workspace as dimmed **Waiting** cards on a dashed line. A waiting card is replaced by the real card once an agent labelled with that role shows up in the team's workspace.
-- Provider sub-agents, such as those Claude Code starts with its Agent tool, appear as lighter **Sub-agent** cards (**하위 에이전트** in Korean) under the Paseo agent that spawned them, labelled with their sub-agent type. They cannot be opened, since they are not Paseo agents. Running sub-agents always show. Finished ones show only when **Show closed** is on.
-- Each card shows the provider logo, the role or caption, the title, and the model, effort (thinking option) and permission mode chips. When an agent has no effort set, its effort chip shows the model's default effort from the provider, dimmed.
+- Provider sub-agents, such as those Claude Code starts with its Agent tool, appear as lighter **Sub-agent** cards (**하위 에이전트** in Korean) under the Paseo agent that spawned them, labelled with their sub-agent type. They cannot be opened, since they are not Paseo agents. In **Brief** density they are collapsed into a **+N** badge under their parent, which expands on press. In **Normal** and **Detailed**, running sub-agents always show, and finished ones show only when **Show closed** is on.
+- In **Detailed** density, each card shows the provider logo, the role or caption, the title, and the model, effort (thinking option) and permission mode chips. When an agent has no effort set, its effort chip shows the model's default effort from the provider, dimmed.
 - Badges: **!** means the agent is waiting for a permission or has failed. An amber pulsing dot means it is running. ✓ means it has finished.
 - Lines to running agents turn into animated red dashes with moving signal dots. An agent that is not running itself but has a running agent below it, such as an orchestrator waiting on its role agents, gets an amber border without the glow.
 - Press a card to open that agent. Closed and archived agents are hidden unless **Show closed** is on.
