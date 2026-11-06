@@ -218,7 +218,7 @@ describe("buildAgentForest", () => {
   });
 
   it("nests siblings and grandchildren together", () => {
-    const agents = [agent("p"), child("a", "p", { createdAt: at(1) }), child("b", "p", { createdAt: at(2) }), child("a1", "a")];
+    const agents = [agent("p"), child("a", "p", { createdAt: at(1), labels: { role: "a" } }), child("b", "p", { createdAt: at(2), labels: { role: "b" } }), child("a1", "a")];
     const { trees } = buildAgentForest(agents, scope, hide);
     expect(ids(trees[0]!.children)).toEqual(["a", "b"]);
     expect(ids(trees[0]!.children[0]!.children)).toEqual(["a1"]);
@@ -270,7 +270,7 @@ describe("buildAgentForest", () => {
 
     it("orders children by createdAt ascending", () => {
       const agents = [agent("p"), child("late", "p", { createdAt: at(8) }), child("early", "p", { createdAt: at(2) }), child("mid", "p", { createdAt: at(5) })];
-      expect(ids(buildAgentForest(agents, scope, hide).trees[0]!.children)).toEqual(["early", "mid", "late"]);
+      expect(ids(buildAgentForest(agents, scope, show).trees[0]!.children)).toEqual(["early", "mid", "late"]);
     });
 
     it("orders solo agents by createdAt descending", () => {
@@ -370,7 +370,7 @@ describe("default effort", () => {
   });
 
   it("applies at every depth of the tree", () => {
-    const { trees } = forest([agent("p"), child("c", "p"), child("g", "c", { thinkingOptionId: "low" }), child("h", "c")]);
+    const { trees } = forest([agent("p"), child("c", "p"), child("g", "c", { thinkingOptionId: "low", labels: { role: "x" } }), child("h", "c", { labels: { role: "y" } })]);
     const mid = trees[0]!.children[0]!;
     expect(trees[0]).toMatchObject({ effort: "high", effortDefault: true });
     expect(mid).toMatchObject({ effort: "high", effortDefault: true });
@@ -516,5 +516,111 @@ describe("buildAgentForest with a roster", () => {
       expect(ids(buildAgentForest(agents, scope, { ...hide, roster }).solo)).toEqual(["b"]);
       expect(ids(buildAgentForest([orchestrator("o"), ...agents], scope, hide).solo).sort()).toEqual(["b", "o"]);
     });
+  });
+});
+
+describe("buildAgentForest without showClosed keeps the newest idle child per type", () => {
+  const scope = ["wks_a"];
+  const role = (name: string) => ({ role: name });
+  const forest = (agents: DashboardAgent[]) => buildAgentForest(agents, scope, hide);
+  const kids = (agents: DashboardAgent[]) => ids(forest(agents).trees[0]?.children ?? []);
+
+  it("collapses idle children of one role to the newest", () => {
+    const agents = [agent("p"), child("old", "p", { labels: role("qa"), createdAt: at(1) }), child("new", "p", { labels: role("qa"), createdAt: at(3) }), child("mid", "p", { labels: role("qa"), createdAt: at(2) })];
+    expect(kids(agents)).toEqual(["new"]);
+  });
+
+  it("keeps the newest of each different role", () => {
+    const agents = [
+      agent("p"),
+      child("qa1", "p", { labels: role("qa"), createdAt: at(1) }),
+      child("qa2", "p", { labels: role("qa"), createdAt: at(2) }),
+      child("ui1", "p", { labels: role("ui"), createdAt: at(3) }),
+      child("ui2", "p", { labels: role("ui"), createdAt: at(4) }),
+    ];
+    expect(kids(agents)).toEqual(["qa2", "ui2"]);
+  });
+
+  it("keeps running children and children needing attention next to the newest idle one", () => {
+    const agents = [
+      agent("p"),
+      child("idle-old", "p", { labels: role("qa"), createdAt: at(1) }),
+      child("run", "p", { labels: role("qa"), createdAt: at(2), status: "running" }),
+      child("perm", "p", { labels: role("qa"), createdAt: at(3), requiresAttention: true, attentionReason: "permission" }),
+      child("err", "p", { labels: role("qa"), createdAt: at(4), requiresAttention: true, attentionReason: "error" }),
+      child("idle-new", "p", { labels: role("qa"), createdAt: at(5) }),
+    ];
+    expect(kids(agents)).toEqual(["run", "perm", "err", "idle-new"]);
+  });
+
+  it("counts a done-badge child as idle", () => {
+    const done = { requiresAttention: true, attentionReason: "finished" };
+    const agents = [agent("p"), child("done-old", "p", { ...done, labels: role("qa"), createdAt: at(1) }), child("done-new", "p", { ...done, labels: role("qa"), createdAt: at(2) }), child("idle", "p", { labels: role("qa"), createdAt: at(3) })];
+    expect(agentNode(agents[1]!).badge).toBe("done");
+    expect(kids(agents)).toEqual(["idle"]);
+  });
+
+  it("keeps an idle child with a running grandchild, and the chain to it", () => {
+    const agents = [
+      agent("p"),
+      child("old", "p", { labels: role("qa"), createdAt: at(1) }),
+      child("run", "old", { status: "running" }),
+      child("new", "p", { labels: role("qa"), createdAt: at(2) }),
+    ];
+    const tree = forest(agents).trees[0]!;
+    expect(ids(tree.children)).toEqual(["old", "new"]);
+    expect(ids(tree.children[0]!.children)).toEqual(["run"]);
+    expect(tree.children[0]!.delegating).toBe(true);
+  });
+
+  it("drops the subtree of a dropped idle child", () => {
+    const agents = [
+      agent("p"),
+      child("old", "p", { labels: role("qa"), createdAt: at(1) }),
+      child("old-kid", "old", { createdAt: at(1) }),
+      child("new", "p", { labels: role("qa"), createdAt: at(2) }),
+    ];
+    const result = forest(agents);
+    expect(ids(result.trees[0]!.children)).toEqual(["new"]);
+    const all = [...result.trees, ...result.solo];
+    expect(all.some((node) => ids(node.children).includes("old-kid") || node.agent.id === "old-kid")).toBe(false);
+  });
+
+  it("competes plain agents by kind and sub-agents by their type", () => {
+    const sub = (id: string, subagentType: string, minute: number) => child(id, "p", { subagent: true, subagentType, createdAt: at(minute), archivedAt: at(minute) });
+    const agents = [agent("p"), sub("s1", "explore", 1), sub("s2", "explore", 2), sub("s3", "plan", 3)];
+    expect(kids(agents)).toEqual(["s2", "s3"]);
+  });
+
+  it("promotes orphans of an archived parent and filters them per original parent", () => {
+    const archived = { archivedAt: "2026-10-30T01:00:00Z" };
+    const agents = [
+      agent("gone1", archived),
+      agent("gone2", archived),
+      child("a-old", "gone1", { labels: role("qa"), createdAt: at(1) }),
+      child("a-new", "gone1", { labels: role("qa"), createdAt: at(2) }),
+      child("b-old", "gone2", { labels: role("qa"), createdAt: at(3) }),
+      child("run", "gone1", { labels: role("qa"), createdAt: at(0), status: "running" }),
+    ];
+    const result = forest(agents);
+    expect(result.trees).toEqual([]);
+    expect(ids(result.solo).sort()).toEqual(["a-new", "b-old", "run"]);
+  });
+
+  it("always shows a running orphan", () => {
+    const agents = [agent("gone", { status: "closed" }), child("run", "gone", { status: "running", createdAt: at(1) }), child("newer", "gone", { createdAt: at(2) })];
+    expect(ids(forest(agents).solo).sort()).toEqual(["newer", "run"]);
+  });
+
+  it("keeps roots with no parent even when idle", () => {
+    const agents = [agent("a", { createdAt: at(1) }), agent("b", { createdAt: at(2) }), agent("c", { createdAt: at(3), labels: role("qa") }), agent("d", { createdAt: at(4), labels: role("qa") })];
+    expect(ids(forest(agents).solo)).toEqual(["d", "c", "b", "a"]);
+  });
+
+  it("shows everything with showClosed", () => {
+    const agents = [agent("p"), child("old", "p", { labels: role("qa"), createdAt: at(1) }), child("new", "p", { labels: role("qa"), createdAt: at(2) }), child("old-kid", "old")];
+    const tree = buildAgentForest(agents, scope, show).trees[0]!;
+    expect(ids(tree.children)).toEqual(["old", "new"]);
+    expect(ids(tree.children[0]!.children)).toEqual(["old-kid"]);
   });
 });

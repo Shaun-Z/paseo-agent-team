@@ -62,9 +62,9 @@ export function parentOf(agent: DashboardAgent): string | undefined {
   return (agent.parentAgentId ?? agent.labels[PARENT_LABEL]) || undefined;
 }
 
-/** Closed and archived agents are hidden unless the user asks for them. */
+/** Closed and archived Paseo agents are hidden; a sub-agent's archive timestamp only means finished. */
 export function isHidden(agent: DashboardAgent): boolean {
-  return agent.status === "closed" || !!agent.archivedAt;
+  return agent.status === "closed" || (!agent.subagent && !!agent.archivedAt);
 }
 
 function kindOf(agent: DashboardAgent): AgentKind {
@@ -131,8 +131,11 @@ function waitingRoles(scope: readonly DashboardAgent[], roster: readonly RosterT
 const newestFirst = (a: AgentNode, b: AgentNode) => b.agent.createdAt.localeCompare(a.agent.createdAt);
 
 /**
- * The agents in the given workspaces as parent → child trees, with the roster's waiting roles after an orchestrator's children. A child whose parent is not shown becomes a root,
- * and so does an agent caught in a parent cycle; a role session of a roster team is the exception and goes under the team's orchestrator.
+ * The agents in the given workspaces as parent → child trees, with waiting roles after an orchestrator's children.
+ * Role adoption happens before filtering. Without showClosed, unclosed/unarchived roots with no parent are shown;
+ * children keep active branches and the newest idle session per sibling type. Promoted orphans compete by original parent.
+ * Branches dropped by this filtering never become roots.
+ * With showClosed, all sessions are shown, promoting missing parents and parent cycles to roots as before.
  */
 export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds: readonly string[], options: { showClosed: boolean; defaultEfforts?: Record<string, string>; roster?: readonly RosterTeam[] }): AgentForest {
   const workspaces = new Set(workspaceIds);
@@ -161,9 +164,38 @@ export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds
     else roots.push(agent);
   }
   const waiting = waitingRoles(scope, options.roster ?? []);
-  const build = (agent: DashboardAgent): AgentNode =>
-    agentNode(agent, [...(children.get(agent.id) ?? []).map(build).sort((a, b) => -newestFirst(a, b)), ...(waiting.get(agent.id) ?? [])], options.defaultEfforts?.[`${agent.provider}/${agent.model}`]);
-  const nodes = roots.map(build);
+  const active = (node: AgentNode) => node.live || node.badge === "attention";
+  const typeOf = (node: AgentNode) => node.role ?? (node.agent.subagent ? node.agent.subagentType : null) ?? node.kind;
+  const activeBranches = new Set<string>();
+  const build = (agent: DashboardAgent): AgentNode => {
+    let kids = (children.get(agent.id) ?? []).map(build).sort((a, b) => -newestFirst(a, b));
+    if (!options.showClosed) {
+      const newest = new Map<string, AgentNode>();
+      for (const kid of kids) {
+        if (!active(kid)) newest.set(typeOf(kid), kid);
+      }
+      kids = kids.filter((kid) => activeBranches.has(kid.agent.id) || newest.get(typeOf(kid)) === kid);
+    }
+    const node = agentNode(agent, [...kids, ...(waiting.get(agent.id) ?? [])], options.defaultEfforts?.[`${agent.provider}/${agent.model}`]);
+    if (active(node) || kids.some((kid) => activeBranches.has(kid.agent.id))) activeBranches.add(agent.id);
+    return node;
+  };
+  let nodes = roots.map(build);
+  if (!options.showClosed) {
+    const newest = new Map<string | undefined, Map<string, AgentNode>>();
+    for (const node of nodes) {
+      const parent = parentOf(node.agent);
+      if ((parent === undefined && !node.agent.subagent) || active(node)) continue;
+      const group = newest.get(parent) ?? new Map<string, AgentNode>();
+      const previous = group.get(typeOf(node));
+      if (!previous || newestFirst(node, previous) <= 0) group.set(typeOf(node), node);
+      newest.set(parent, group);
+    }
+    nodes = nodes.filter((node) =>
+      (parentOf(node.agent) === undefined && !node.agent.subagent) ||
+      activeBranches.has(node.agent.id) ||
+      newest.get(parentOf(node.agent))?.get(typeOf(node)) === node);
+  }
   const trees = nodes.filter((node) => node.children.length).sort((a, b) => Number(b.kind === "orchestrator") - Number(a.kind === "orchestrator") || newestFirst(a, b));
   return { trees, solo: nodes.filter((node) => !node.children.length).sort(newestFirst) };
 }

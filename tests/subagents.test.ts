@@ -142,12 +142,21 @@ describe("buildAgentForest with sub-agents", () => {
     expect(trees[0]!.children.map((child) => [child.agent.id, child.kind, child.live])).toEqual([["subagent:a1:s1", "subagent", true]]);
   });
 
-  it("hides a finished sub-agent unless showClosed", () => {
-    const finished = [sub({ status: "completed", updatedAt: T1 })];
-    const hidden = forest(finished, false);
-    expect(hidden.trees).toEqual([]);
-    expect(hidden.solo.map((node) => [node.agent.id, node.children])).toEqual([["a1", []]]);
+  it("shows only the newest finished sub-agent of a type unless showClosed", () => {
+    const finished = [
+      sub({ id: "s1", status: "completed", createdAt: T0, updatedAt: T0 }),
+      sub({ id: "s2", status: "completed", createdAt: T1, updatedAt: T1 }),
+      sub({ id: "s3", title: "explore", status: "failed", createdAt: T0, updatedAt: T0 }),
+    ];
+    const hidden = forest(finished, false).trees[0]!;
+    expect(hidden.children.map((child) => child.agent.id).sort()).toEqual(["subagent:a1:s2", "subagent:a1:s3"]);
     const shown = forest(finished, true).trees[0]!;
-    expect(shown.children.map((child) => [child.agent.id, child.kind])).toEqual([["subagent:a1:s1", "subagent"]]);
+    expect(shown.children.map((child) => [child.agent.id, child.kind])).toEqual([["subagent:a1:s1", "subagent"], ["subagent:a1:s3", "subagent"], ["subagent:a1:s2", "subagent"]]);
+  });
+
+  it("keeps a lone finished sub-agent, and a running one beside a newer finished one", () => {
+    expect(forest([sub({ status: "completed", updatedAt: T1 })], false).trees[0]!.children.map((child) => child.agent.id)).toEqual(["subagent:a1:s1"]);
+    const mixed = [sub({ id: "s1", createdAt: T0 }), sub({ id: "s2", status: "completed", createdAt: T1, updatedAt: T1 })];
+    expect(forest(mixed, false).trees[0]!.children.map((child) => child.agent.id)).toEqual(["subagent:a1:s1", "subagent:a1:s2"]);
   });
 });
