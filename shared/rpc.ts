@@ -198,6 +198,13 @@ export const teamApplyRpc = defineRpc({
   ]),
 });
 
+/** Applies a saved team, matching or creating its orchestrator workspace. */
+export const teamRestoreRpc = defineRpc({
+  name: "team.restore",
+  input: z.object({ projectId: z.string(), file: z.string() }),
+  output: teamApplyRpc.output,
+});
+
 /** Archives the workspace's orchestrators and starts a new one from the team file on disk; role sessions are kept. */
 export const teamRestartOrchestratorRpc = defineRpc({
   name: "team.restart-orchestrator",

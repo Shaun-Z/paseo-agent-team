@@ -35,6 +35,8 @@ export const en = {
     deleteFileFailed: "Some team files could not be deleted: {{failure}}",
     reconnect: "Reconnect",
     reconnectPick: "Pick the workspace this team now runs in",
+    startNewWorkspace: "Start in a new workspace",
+    noWorkspaceToPick: "This project has no workspace to pick.",
   },
   current: {
     orchestrator: "Orchestrator: {{workspace}} · {{model}}",
@@ -150,6 +152,8 @@ export const ko: Shape<typeof en> = {
     deleteFileFailed: "일부 팀 파일을 삭제하지 못했습니다: {{failure}}",
     reconnect: "재연결",
     reconnectPick: "이 팀이 이제 쓰는 워크스페이스를 고르세요",
+    startNewWorkspace: "새 워크스페이스에서 시작",
+    noWorkspaceToPick: "이 프로젝트에는 선택할 워크스페이스가 없습니다.",
   },
   current: {
     orchestrator: "오케스트레이터: {{workspace}} · {{model}}",
@@ -263,6 +267,8 @@ export const ja: Shape<typeof en> = {
     deleteFileFailed: "一部のチームファイルを削除できませんでした: {{failure}}",
     reconnect: "再接続",
     reconnectPick: "このチームが現在使用しているワークスペースを選んでください",
+    startNewWorkspace: "新しいワークスペースで開始",
+    noWorkspaceToPick: "このプロジェクトには選択できるワークスペースがありません。",
   },
   current: {
     orchestrator: "オーケストレーター: {{workspace}} · {{model}}",
@@ -376,6 +382,8 @@ export const zh: Shape<typeof en> = {
     deleteFileFailed: "部分团队文件无法删除：{{failure}}",
     reconnect: "重新连接",
     reconnectPick: "请选择此团队当前使用的工作区",
+    startNewWorkspace: "在新工作区中启动",
+    noWorkspaceToPick: "此项目没有可选的工作区。",
   },
   current: {
     orchestrator: "协调器：{{workspace}} · {{model}}",

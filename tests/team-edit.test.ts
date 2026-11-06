@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyTeamEdit, summarizeTeamEdit } from "../shared/team-edit";
 import { extractProposal, teamEditPrompt } from "../shared/proposal";
-import { teamEditProposalRpc, teamEditProposeRpc } from "../shared/rpc";
+import { teamApplyRpc, teamEditProposalRpc, teamEditProposeRpc, teamRestoreRpc } from "../shared/rpc";
 import type { Team } from "../shared/team";
 import type { ProviderInfo } from "../shared/validate";
 
@@ -192,5 +192,32 @@ describe("team edit RPC contracts", () => {
     expect(teamEditProposalRpc.output.safeParse({ status: "done", team: draft, validation: [{ target: "qa", message: "unknown model" }] }).success).toBe(true);
     expect(teamEditProposalRpc.output.safeParse({ status: "failed", errors: ["x"] }).success).toBe(true);
     expect(teamEditProposalRpc.output.safeParse({ status: "done", team: draft }).success).toBe(false);
+  });
+});
+
+describe("team restore RPC contract", () => {
+  it("requires both projectId and file strings", () => {
+    expect(teamRestoreRpc.name).toBe("team.restore");
+    expect(teamRestoreRpc.input.safeParse({ projectId: "prj_1", file: ".agents/teams/lead.json" }).success).toBe(true);
+    expect(teamRestoreRpc.input.safeParse({ projectId: "prj_1" }).success).toBe(false);
+    expect(teamRestoreRpc.input.safeParse({ file: ".agents/teams/lead.json" }).success).toBe(false);
+    expect(teamRestoreRpc.input.safeParse({ projectId: "prj_1", file: 3 }).success).toBe(false);
+    expect(teamRestoreRpc.input.safeParse({}).success).toBe(false);
+  });
+
+  it("accepts ok:false with errors and an ok:true apply result", () => {
+    expect(teamRestoreRpc.output.safeParse({ ok: false, errors: ["x"] }).success).toBe(true);
+    const applied = { ok: true, file: "/p/.agents/teams/lead.json", workspaces: [{ target: "lead", workspace: "lead", id: "wks_1", created: false }], orchestratorAgentId: "agt_1", cleanup: [], permission: null };
+    expect(teamRestoreRpc.output.safeParse(applied).success).toBe(true);
+    expect(teamRestoreRpc.output.safeParse({ ...applied, permission: ".claude/settings.local.json" }).success).toBe(true);
+  });
+
+  it("rejects results that are neither shape", () => {
+    expect(teamRestoreRpc.output.safeParse({ ok: false }).success).toBe(false);
+    expect(teamRestoreRpc.output.safeParse({ ok: true, file: "f" }).success).toBe(false);
+  });
+
+  it("uses the same output schema object as teamApplyRpc", () => {
+    expect(teamRestoreRpc.output).toBe(teamApplyRpc.output);
   });
 });

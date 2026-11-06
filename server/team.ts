@@ -8,7 +8,7 @@ import { CLAUDE_LOCAL_SETTINGS, needsCreateAgentPermission, needsRunPermission, 
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractInstructions, extractProposal, INSTRUCTIONS_JSON_SCHEMA, instructionsPrompt, plannerPrompt, teamEditPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
-import type { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc } from "../shared/rpc";
+import type { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
 import { legacyWorkspacesOf, sameTeamFiles, teamFileFor, teamFileWorkspaces, teamIn, workspaceOwnerOf, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
 import { agentFeaturesOf, catalogFrom, roleModes, agentModeOf, type AgentFeatures, validateTeam, type ProviderEntry } from "../shared/validate";
@@ -377,6 +377,15 @@ export async function restartOrchestrator(target: RpcInput<typeof teamRestartOrc
   if (failures.length) return { ok: false, errors: failures };
   const orchestrator = await startOrchestrator(paseo, workspaceId, team, roleModes(team, providers), agentModeOf(providers, team.orchestrator.provider), file, features, featureValues);
   return { ok: true, orchestratorAgentId: orchestrator.id, archived };
+}
+
+/** Restores a saved team through the same validation and workspace setup as Apply. */
+export async function restoreTeam({ projectId, file }: RpcInput<typeof teamRestoreRpc>, ctx: PluginHandlerContext): Promise<RpcOutput<typeof teamRestoreRpc>> {
+  const project = await projectOf(ctx.paseo, { projectId });
+  const { teams } = await projectTeams(project);
+  const saved = teams.find((entry) => entry.file === file);
+  if (!saved) return { ok: false, errors: [`Team file ${file} was not found.`] };
+  return applyTeam({ projectId, team: saved.team }, ctx);
 }
 
 export async function applyTeam({ team: input, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamApplyRpc>> {

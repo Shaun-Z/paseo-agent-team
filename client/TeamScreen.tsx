@@ -1,11 +1,12 @@
+import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { messages } from "./i18n";
-import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc } from "../shared/rpc";
+import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
 import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
 
 export const SCREEN_ID = "team";
@@ -34,6 +35,7 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
   const queryClient = useQueryClient();
   const remove = useRpc(teamDeleteRpc);
   const reconnect = useRpc(teamReconnectRpc);
+  const restore = useRpc(teamRestoreRpc);
   // The team row waiting for a second press, keyed by project and file.
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState<string | null>(null);
@@ -66,6 +68,21 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
     onError: (error) => toast.error(String(error)),
   });
 
+  const openApplied = (result: Extract<RpcOutput<typeof teamRestoreRpc>, { ok: true }>) => {
+    if (result.cleanup.length) toast.error(t("result.cleanupFailed", { failure: result.cleanup.join("; ") }));
+    navigation?.openWorkspace({ workspaceId: result.workspaces[0]!.id });
+  };
+  const restored = useMutation({
+    mutationFn: (input: { projectId: string; file: string }) => restore(input),
+    onSuccess: (result) => {
+      if (!result.ok) return;
+      setReconnecting(null);
+      invalidateTeams();
+      openApplied(result);
+    },
+  });
+  const reconnectBusy = reconnected.isPending || restored.isPending;
+
   if (projectId) {
     return (
       <View style={s.screen}>
@@ -77,11 +94,7 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
           layout={layout}
           navigation={navigation}
           target={{ projectId }}
-          onApplied={(result) => {
-            // The screen is left right away, so cleanup problems go to a toast instead of the result card.
-            if (result.cleanup.length) toast.error(t("result.cleanupFailed", { failure: result.cleanup.join("; ") }));
-            navigation?.openWorkspace({ workspaceId: result.workspaces[0]!.id });
-          }}
+          onApplied={openApplied}
         />
       </View>
     );
@@ -92,7 +105,10 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
       <Text style={s.title}>{t("screen.title")}</Text>
       {projects.isLoading ? <Text style={s.muted}>{t("loading")}</Text> : null}
       {projects.error ? <Text style={s.danger}>{String(projects.error)}</Text> : null}
-      {projects.data?.map((project) => (
+      {projects.data?.map((project) => {
+        const occupiedWorkspaces = new Set(project.teams.map((team) => team.workspaceId).filter((id) => id != null));
+        const reconnectWorkspaces = project.workspaces.filter((workspace) => !occupiedWorkspaces.has(workspace.id));
+        return (
         <View key={project.id} style={s.card}>
           <Text style={s.text}>{project.name}</Text>
           <Text style={s.muted}>{project.root}</Text>
@@ -105,17 +121,24 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
               <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
               {!team.workspaceId ? <Text style={s.muted}>{t("screen.workspaceMissing")}</Text> : null}
               <Button s={s} secondary label={t("screen.openTeam")} disabled={!team.workspaceId} onPress={() => team.workspaceId && openTeamPanel?.(team.workspaceId)} />
-              {!team.workspaceId ? <Button s={s} secondary label={t("screen.reconnect")} disabled={reconnected.isPending} onPress={() => setReconnecting(`${project.id}:${team.file}`)} /> : null}
+              {!team.workspaceId ? <Button s={s} secondary label={t("screen.reconnect")} disabled={reconnectBusy} onPress={() => { restored.reset(); setReconnecting(`${project.id}:${team.file}`); }} /> : null}
               <Button s={s} secondary label={t("screen.deleteTeam")} disabled={deleted.isPending} onPress={() => setConfirming(`${project.id}:${team.file}`)} />
               {!team.workspaceId && reconnecting === `${project.id}:${team.file}` ? (
                 <View style={[s.card, { width: "100%" }]}>
                   <Text style={s.text}>{t("screen.reconnectPick")}</Text>
+                  {!reconnectWorkspaces.length ? <Text style={s.muted}>{t("screen.noWorkspaceToPick")}</Text> : null}
                   <View style={s.row}>
-                    {project.workspaces.map((workspace) => (
-                      <Button key={workspace.id} s={s} label={workspace.title} disabled={reconnected.isPending} onPress={() => reconnected.mutate({ projectId: project.id, file: team.file, workspaceId: workspace.id })} />
+                    {reconnectWorkspaces.map((workspace) => (
+                      <Button key={workspace.id} s={s} label={workspace.title} disabled={reconnectBusy} onPress={() => reconnected.mutate({ projectId: project.id, file: team.file, workspaceId: workspace.id })} />
                     ))}
-                    <Button s={s} secondary label={t("review.cancel")} disabled={reconnected.isPending} onPress={() => setReconnecting(null)} />
+                    <Button s={s} secondary label={t("screen.startNewWorkspace")} disabled={reconnectBusy} onPress={() => restored.mutate({ projectId: project.id, file: team.file })} />
+                    <Button s={s} secondary label={t("review.cancel")} disabled={reconnectBusy} onPress={() => setReconnecting(null)} />
                   </View>
+                  {reconnectBusy ? <View style={s.row}><ActivityIndicator color={theme.colors.accent} /><Text style={s.muted}>{t(restored.isPending ? "result.applying" : "loading")}</Text></View> : null}
+                  {restored.variables?.projectId === project.id && restored.variables.file === team.file ? <>
+                    {restored.error ? <Text style={s.danger}>{String(restored.error)}</Text> : null}
+                    {restored.data && !restored.data.ok ? restored.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+                  </> : null}
                 </View>
               ) : null}
               {confirming === `${project.id}:${team.file}` ? (
@@ -133,7 +156,8 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
             <Button s={s} label={t("screen.newTeam")} onPress={() => setProjectId(project.id)} />
           </View>
         </View>
-      ))}
+        );
+      })}
     </ScrollView>
   );
 }
