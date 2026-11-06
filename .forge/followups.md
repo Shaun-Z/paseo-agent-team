@@ -43,3 +43,11 @@
 <!-- followup: fu-83ae26233411 | source: team-editor-select-layout | task: 14 | date: 2026-11-02 | status: taken | taken: 16 -->
 - 팀이 이미 있는 워크스페이스의 팀 패널에 "This workspace has no team yet…" 생성 카드가 팀 요약 아래에 함께 보인다. 문구가 사실과 다르고, 같은 워크스페이스에 두 번째 팀을 만들라는 것처럼 읽힌다.
   Evidence: app.paseo.sh orchestrator-2 팀 패널에서 확인. `client/TeamPanel.tsx`의 생성 카드 조건이 `!draft`뿐이고, 5fa77ca에도 같은 조건이었다.
+
+<!-- followup: fu-b09bdbecf2ea | source: team-edit-with-ai | task: 15 | date: 2026-11-06 | status: open | taken: - -->
+- 앱에서 "AI로 팀 편집"을 실제로 돌려 요약 카드·적용/버리기·Cancel 동작과 planner 응답 품질(요청하지 않은 role을 건드리지 않는지)을 확인한다.
+  Evidence: 종료 조건 C1~C8은 계약·로직·문구·로드만 검사하며 화면과 실제 planner 출력은 확인하지 않았다.
+
+<!-- followup: fu-b22ddb3a5c98 | source: team-edit-with-ai | task: 15 | date: 2026-11-06 | status: open | taken: - -->
+- tests/daemon.e2e.test.ts에서 지운 "proposes one role from a description" 케이스 대신 team.edit.propose/proposal을 실제 데몬으로 돌리는 E2E 케이스를 추가한다.
+  Evidence: S2에서 role planner E2E 케이스를 제거했고 대체 E2E는 없다(PASEO_E2E는 토큰 비용 때문에 이번 범위에서 제외).

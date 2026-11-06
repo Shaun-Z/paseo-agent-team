@@ -6,10 +6,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { withFreeWorkspaces } from "../shared/apply-plan";
-import { foldersText, newRole, parseFolders, uniqueName } from "../shared/draft";
+import { foldersText, newRole, parseFolders } from "../shared/draft";
+import { EMPTY_HISTORY, record, undo, redo, type DraftHistory } from "../shared/draft-history";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
+import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc } from "../shared/rpc";
 import { checkTeam, type Role, type Team } from "../shared/team";
+import { applyTeamEdit, summarizeTeamEdit } from "../shared/team-edit";
 import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
 
@@ -376,8 +378,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const proposal = useRpc(teamProposalRpc);
   const apply = useRpc(teamApplyRpc);
   const restartOrchestrator = useRpc(teamRestartOrchestratorRpc);
-  const proposeRole = useRpc(teamRoleProposeRpc);
-  const roleProposal = useRpc(teamRoleProposalRpc);
+  const proposeTeamEdit = useRpc(teamEditProposeRpc);
+  const teamEditProposal = useRpc(teamEditProposalRpc);
   const pendingProposal = useRpc(teamPendingProposalRpc);
   const cancelProposal = useRpc(teamProposalCancelRpc);
 
@@ -385,6 +387,16 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const [goal, setGoal] = useState("");
   const [plannerId, setPlannerId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Team | null>(null);
+  const [history, setHistory] = useState<DraftHistory>(EMPTY_HISTORY);
+  const [editNotice, setEditNotice] = useState<{
+    summary: ReturnType<typeof summarizeTeamEdit>;
+    validation: Extract<RpcOutput<typeof teamEditProposalRpc>, { status: "done" }>["validation"];
+  } | null>(null);
+  const appliedEditId = useRef<string | null>(null);
+  const resetEditHistory = () => {
+    setHistory(EMPTY_HISTORY);
+    setEditNotice(null);
+  };
   const [editingRoleIndex, setEditingRoleIndex] = useState<number | null>(null);
   const [roleGroupWidth, setRoleGroupWidth] = useState(0);
   const [confirmRestart, setConfirmRestart] = useState(false);
@@ -429,61 +441,66 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const titles = current.data?.projectWorkspaces ?? [];
   const fresh = (team: Team): Team => withFreeWorkspaces(atHere(team), titles, { orchestrator: here === null });
   useEffect(() => {
-    if (planning.data?.status === "done") setDraft(fresh(planning.data.team));
+    if (planning.data?.status === "done") { resetEditHistory(); cancelTeamEdit(); setDraft(fresh(planning.data.team)); }
   }, [planning.data]);
 
-  // One AI role request at a time; its result is appended to the draft and dropped if the draft was cancelled.
-  const [roleDescription, setRoleDescription] = useState("");
-  const [rolePlannerId, setRolePlannerId] = useState<string | null>(null);
-  const [roleStarting, setRoleStarting] = useState(false);
-  const [roleStartError, setRoleStartError] = useState<string | null>(null);
-  const roleRequest = useRef(0);
-  const cancelRolePlanning = () => {
-    roleRequest.current += 1;
-    setRoleStarting(false);
-    setRoleStartError(null);
-    setRolePlannerId(null);
+  // Keep AI edits separate from the draft until accepted; cancellation ignores late start responses.
+  const [editRequest, setEditRequest] = useState("");
+  const [editPlannerId, setEditPlannerId] = useState<string | null>(null);
+  const [editStarting, setEditStarting] = useState(false);
+  const [editStartError, setEditStartError] = useState<string | null>(null);
+  const editRequestCounter = useRef(0);
+  const cancelTeamEdit = () => {
+    editRequestCounter.current += 1;
+    setEditStarting(false);
+    setEditStartError(null);
+    setEditPlannerId(null);
+    setEditNotice(null);
   };
-  const rolePlanning = useQuery({
-    queryKey: ["workspace-agents", "role-proposal", rolePlannerId],
-    queryFn: () => roleProposal({ agentId: rolePlannerId! }),
-    enabled: rolePlannerId !== null,
+  const editPlanning = useQuery({
+    queryKey: ["workspace-agents", "team-edit-proposal", editPlannerId],
+    queryFn: () => teamEditProposal({ agentId: editPlannerId! }),
+    enabled: editPlannerId !== null,
     refetchInterval: (query) => (query.state.data?.status === "running" || !query.state.data ? 2000 : false),
   });
-  useEffect(() => {
-    if (rolePlanning.data?.status !== "done") return;
-    const role = rolePlanning.data.role;
-    const freeRole = (team: Team): Role => ({
-      ...role,
-      name: uniqueName(role.name, team.roles.map((other) => other.name)),
-    });
-    setDraft((current) => (current ? { ...current, roles: [...current.roles, freeRole(current)] } : current));
-    setRoleDescription("");
-    setRolePlannerId(null);
-  }, [rolePlanning.data]);
-  const startRole = useMutation({
+  const startTeamEdit = useMutation({
     onMutate: () => {
-      const request = ++roleRequest.current;
-      setRoleStarting(true);
-      setRoleStartError(null);
+      const request = ++editRequestCounter.current;
+      setEditPlannerId(null);
+      setEditNotice(null);
+      setEditStarting(true);
+      setEditStartError(null);
       return { request };
     },
     mutationFn: (team: Team) =>
-      proposeRole({ ...target, description: roleDescription, team: { orchestratorWorkspace: team.orchestrator.workspace, roles: team.roles.map(({ name, folders }) => ({ name, folders })) } }),
+      proposeTeamEdit({ ...target, request: editRequest, team }),
     onSuccess: ({ agentId }, _team, context) => {
-      if (roleRequest.current !== context.request) return;
-      setRoleStarting(false);
-      setRolePlannerId(agentId);
+      if (editRequestCounter.current !== context.request) return;
+      setEditStarting(false);
+      setEditPlannerId(agentId);
     },
     onError: (error, _team, context) => {
-      if (roleRequest.current !== context?.request) return;
-      setRoleStarting(false);
-      setRoleStartError(String(error));
+      if (editRequestCounter.current !== context?.request) return;
+      setEditStarting(false);
+      setEditStartError(String(error));
     },
   });
-  const roleBusy = roleStarting || (rolePlannerId !== null && rolePlanning.data?.status !== "failed");
+  const editBusy = editStarting || (editPlannerId !== null && (!editPlanning.data || editPlanning.data.status === "running"));
 
-  const start = useMutation({ mutationFn: () => propose({ ...target, goal }), onSuccess: ({ agentId }) => setPlannerId(agentId) });
+  useEffect(() => {
+    const result = editPlanning.data;
+    if (!draft || !editPlannerId || result?.status !== "done" || appliedEditId.current === editPlannerId) return;
+    appliedEditId.current = editPlannerId;
+    const after = applyTeamEdit(draft, result.team);
+    setHistory((current) => record(current, draft));
+    setDraft(after);
+    setEditNotice({ summary: summarizeTeamEdit(draft, after), validation: result.validation });
+    setEditRequest("");
+    setEditPlannerId(null);
+  }, [draft, editPlannerId, editPlanning.data]);
+  const editSummary = editNotice?.summary;
+
+  const start = useMutation({ onMutate: () => { resetEditHistory(); cancelTeamEdit(); }, mutationFn: () => propose({ ...target, goal }), onSuccess: ({ agentId }) => setPlannerId(agentId) });
   const applied = useMutation({
     mutationFn: (team: Team) => apply({ ...target, team }),
     onSuccess: (result) => {
@@ -547,8 +564,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const teamBusy = plannerId !== null && (!planning.data || planning.data.status === "running");
   const progress = applied.isPending
     ? { status: t("result.applying"), error: null, onCancel: null }
-    : roleBusy
-      ? { status: t("review.rolePlanning"), error: rolePlanning.error ? String(rolePlanning.error) : null, onCancel: cancelRolePlanning }
+    : editBusy
+      ? { status: t("review.editPlanning"), error: editPlanning.error ? String(editPlanning.error) : null, onCancel: cancelTeamEdit }
       : teamBusy
         ? {
             status: t("create.planning"),
@@ -578,7 +595,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           ))}
           {data.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
           <View style={s.row}>
-            <Button s={s} label={t("current.edit")} onPress={() => setDraft(data.team)} />
+            <Button s={s} label={t("current.edit")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(data.team); }} />
             <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending || restarted.isPending} onPress={() => applied.mutate(data.team!)} />
             <Button s={s} secondary label={t("current.restart")} disabled={applied.isPending || restarted.isPending} onPress={() => setConfirmRestart(true)} />
           </View>
@@ -732,7 +749,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           <TextInput style={s.input} value={goal} placeholder={t("create.goalPlaceholder")} onChangeText={setGoal} />
           <View style={s.row}>
             <Button s={s} label={t("create.propose")} disabled={!goal.trim() || start.isPending || planning.data?.status === "running"} onPress={() => start.mutate()} />
-            <Button s={s} secondary label={t("create.blank")} onPress={() => setDraft(fresh({ version: 1, goal, orchestrator: { workspace: "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])] }))} />
+            <Button s={s} secondary label={t("create.blank")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(fresh({ version: 1, goal, orchestrator: { workspace: "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])] })); }} />
           </View>
           {planning.data?.status === "failed" ? planning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
           {start.error ? <Text style={s.danger}>{String(start.error)}</Text> : null}
@@ -771,19 +788,35 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
                 ))}
                 <Button s={s} secondary label={t("review.addRole")} onPress={() => setDraft((current) => (current ? { ...current, roles: [...current.roles, newRole(catalog, current.roles.map((role) => role.name))] } : current))} />
                 <View style={s.card}>
-                  <TextInput style={s.input} value={roleDescription} placeholder={t("review.roleDescription")} multiline onChangeText={setRoleDescription} />
+                  <TextInput style={s.input} value={editRequest} placeholder={t("review.teamEditRequest")} multiline onChangeText={setEditRequest} />
                   <View style={s.row}>
-                    <Button s={s} secondary label={t("review.addRoleWithAi")} disabled={!roleDescription.trim() || roleBusy} onPress={() => startRole.mutate(draft)} />
+                    <Button s={s} secondary label={t("review.editTeamWithAi")} disabled={!editRequest.trim() || editBusy} onPress={() => startTeamEdit.mutate(draft)} />
+                    <Button s={s} secondary label={t("review.undo")} disabled={!history.past.length || editBusy} onPress={() => { const result = undo(history, draft); if (result) { setHistory(result.history); setDraft(result.draft); setEditNotice(null); } }} />
+                    <Button s={s} secondary label={t("review.redo")} disabled={!history.future.length || editBusy} onPress={() => { const result = redo(history, draft); if (result) { setHistory(result.history); setDraft(result.draft); setEditNotice(null); } }} />
                   </View>
-                  {rolePlanning.data?.status === "failed" ? rolePlanning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
-                  {roleStartError ? <Text style={s.danger}>{roleStartError}</Text> : null}
+                  {editPlanning.data?.status === "failed" ? editPlanning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+                  {editPlanning.error ? <Text style={s.danger}>{String(editPlanning.error)}</Text> : null}
+                  {editNotice && editSummary ? (
+                    <View style={s.card}>
+                      <Text style={s.text}>{t("review.editSummary")}</Text>
+                      {editSummary.added.map((name) => <Text key={`added-${name}`} style={s.text}>{t("review.editAdded", { name })}</Text>)}
+                      {editSummary.removed.map((name) => <Text key={`removed-${name}`} style={s.text}>{t("review.editRemoved", { name })}</Text>)}
+                      {editSummary.changed.map(({ name, fields }) => <Text key={`changed-${name}`} style={s.text}>{t("review.editChanged", { name, fields: fields.map((field) => t(`role.${field}`)).join(", ") })}</Text>)}
+                      {editSummary.orchestrator ? <Text style={s.text}>{t("review.editOrchestratorChanged")}</Text> : null}
+                      {editSummary.goal ? <Text style={s.text}>{t("review.editGoalChanged")}</Text> : null}
+                      {!editSummary.added.length && !editSummary.removed.length && !editSummary.changed.length && !editSummary.orchestrator && !editSummary.goal ? <Text style={s.muted}>{t("review.editNoChanges")}</Text> : null}
+                      {editNotice.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
+
+                    </View>
+                  ) : null}
+                  {editStartError ? <Text style={s.danger}>{editStartError}</Text> : null}
                 </View>
               </View>
             </View>
             {problems.map((problem) => <Text key={problem} style={s.danger}>{problem}</Text>)}
             <View style={s.row}>
               <Button s={s} label={t("review.apply")} disabled={problems.length > 0 || applied.isPending} onPress={() => applied.mutate(draft)} />
-              <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelRolePlanning(); setPicker(null); setEditingRoleIndex(null); setDraft(null); setPlannerId(null); }} />
+              <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelTeamEdit(); resetEditHistory(); setEditRequest(""); setPicker(null); setEditingRoleIndex(null); setDraft(null); setPlannerId(null); }} />
             </View>
           </View>
         </SelectContext.Provider>

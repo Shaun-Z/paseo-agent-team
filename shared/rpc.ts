@@ -1,6 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { RoleSchema, TeamSchema } from "./team";
+import { TeamSchema } from "./team";
 
 const ProviderInfoSchema = z.object({
   id: z.string(),
@@ -129,20 +129,28 @@ const TeamOutlineSchema = z.object({
   roles: z.array(z.object({ name: z.string(), folders: z.array(z.string()) })),
 });
 
-/** Starts a planner agent that proposes one more role for the team being edited. */
-export const teamRoleProposeRpc = defineRpc({
-  name: "team.role.propose",
-  input: TargetSchema.and(z.object({ description: z.string().trim().min(1), team: TeamOutlineSchema })),
+/** Starts a planner that revises the whole team draft, including incomplete editor fields. */
+export const teamEditProposeRpc = defineRpc({
+  name: "team.edit.propose",
+  input: TargetSchema.and(z.object({
+    request: z.string().trim().min(1),
+    team: z.object({
+      version: z.literal(1),
+      goal: z.string(),
+      orchestrator: z.object({ workspace: z.string(), provider: z.string(), model: z.string() }),
+      roles: z.array(z.object({ name: z.string(), provider: z.string(), model: z.string(), folders: z.array(z.string()), instructions: z.string() })),
+    }),
+  })),
   output: z.object({ agentId: z.string() }),
 });
 
-/** The role planner's proposal once it has finished. */
-export const teamRoleProposalRpc = defineRpc({
-  name: "team.role.proposal",
+/** The team editor's proposal once it has finished. */
+export const teamEditProposalRpc = defineRpc({
+  name: "team.edit.proposal",
   input: z.object({ agentId: z.string() }),
   output: z.discriminatedUnion("status", [
     z.object({ status: z.literal("running") }),
-    z.object({ status: z.literal("done"), role: RoleSchema }),
+    z.object({ status: z.literal("done"), team: TeamSchema, validation: z.array(TeamErrorSchema) }),
     z.object({ status: z.literal("failed"), errors: z.array(z.string()) }),
   ]),
 });

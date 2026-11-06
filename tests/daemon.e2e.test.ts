@@ -7,11 +7,11 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, cancelProposal, deleteTeam, pendingProposal, projectTeamsList, proposeRole, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
+import { applyTeam, cancelProposal, deleteTeam, pendingProposal, projectTeamsList, proposeTeam, readTeam, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE } from "../shared/permissions";
 import { TeamSchema, type Team } from "../shared/team";
-import { agentModeOf, validateTeam } from "../shared/validate";
+import { agentModeOf } from "../shared/validate";
 
 describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemon", () => {
   let paseo: PaseoClient;
@@ -83,23 +83,6 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     throw new Error("the planner did not finish in 5 minutes");
-  }, 330_000);
-
-  it("proposes one role from a description", async () => {
-    const team = { orchestratorWorkspace: proposed.orchestrator.workspace, roles: proposed.roles.map(({ name, folders }) => ({ name, folders })) };
-    const { agentId } = await proposeRole({ workspaceId, description: "Writes and runs end-to-end tests for the game", team }, { paseo });
-    for (let attempt = 0; attempt < 150; attempt += 1) {
-      const result = await roleProposal({ agentId }, { paseo });
-      if (result.status === "failed") throw new Error(result.errors.join("\n"));
-      if (result.status === "done") {
-        const extended = TeamSchema.parse({ ...proposed, roles: [...proposed.roles, result.role] });
-        expect(validateTeam(extended, (await readTeam({ workspaceId }, { paseo })).catalog)).toEqual([]);
-        proposed = extended;
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-    throw new Error("the role planner did not finish in 5 minutes");
   }, 330_000);
 
   it("restores the pending team proposal and archives it on cancel", async () => {

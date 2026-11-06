@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractProposal, plannerPrompt, ROLE_JSON_SCHEMA, TEAM_JSON_SCHEMA } from "../shared/proposal";
+import { extractProposal, plannerPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import type { ProviderInfo } from "../shared/validate";
 
 const catalog: ProviderInfo[] = [
@@ -59,7 +59,6 @@ describe("TEAM_JSON_SCHEMA", () => {
     const role = TEAM_JSON_SCHEMA.properties.roles.items;
     expect(role.required).not.toContain("workspace");
     expect(role.properties).not.toHaveProperty("workspace");
-    expect(ROLE_JSON_SCHEMA.properties).not.toHaveProperty("workspace");
   });
 
   it("still requires the orchestrator's workspace to be non-empty", () => {

@@ -1,4 +1,4 @@
-import { checkTeam, RoleSchema, type ParseResult, type Role } from "./team";
+import { checkTeam, type ParseResult, type Role, type Team } from "./team";
 import type { ProviderInfo } from "./validate";
 
 const text = { type: "string", minLength: 1 } as const;
@@ -9,14 +9,6 @@ export const INSTRUCTIONS_JSON_SCHEMA = {
   additionalProperties: false,
   required: ["instructions"],
   properties: { instructions: text },
-};
-
-/** The role planner's `outputSchema`: one role, every field present. */
-export const ROLE_JSON_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["name", "provider", "model", "folders", "instructions"],
-  properties: { name: text, provider: text, model: text, folders: { type: "array", items: text }, instructions: { type: "string" } },
 };
 
 /** The planner agent's `outputSchema`: a complete team file, every field present. */
@@ -33,19 +25,23 @@ export const TEAM_JSON_SCHEMA = {
       required: ["workspace", "provider", "model"],
       properties: { workspace: text, provider: text, model: text },
     },
-    roles: { type: "array", minItems: 1, items: ROLE_JSON_SCHEMA },
+    roles: { type: "array", minItems: 1, items: {
+      type: "object",
+      additionalProperties: false,
+      required: ["name", "provider", "model", "folders", "instructions"],
+      properties: { name: text, provider: text, model: text, folders: { type: "array", items: text }, instructions: { type: "string" } },
+    } },
   },
 };
 
 // outputSchema isn't enforced by every provider (Claude answered with its own key names),
 // so the prompt shows the exact shape too.
-const ROLE_EXAMPLE = { name: "<role>", provider: "<provider id>", model: "<model id>", folders: ["<relative/path>"], instructions: "<what this role does>" };
 const INSTRUCTIONS_EXAMPLE = { instructions: "<improved instructions>" };
 const EXAMPLE = {
   version: 1,
   goal: "<the goal>",
   orchestrator: { workspace: "orchestrator", provider: "<provider id>", model: "<model id>" },
-  roles: [ROLE_EXAMPLE],
+  roles: [{ name: "<role>", provider: "<provider id>", model: "<model id>", folders: ["<relative/path>"], instructions: "<what this role does>" }],
 };
 
 function modelLines(catalog: readonly ProviderInfo[]): string[] {
@@ -93,43 +89,37 @@ export function extractProposal(message: string | null): ParseResult {
   return checkTeam(json.value);
 }
 
-/** What the role planner needs to know about the team being edited, so the new role doesn't overlap it. */
+/** The team context used to keep a role's instructions within its ownership. */
 export interface TeamOutline {
   orchestratorWorkspace: string;
   roles: { name: string; folders: string[] }[];
 }
 
-/** Asks a planner agent for one more role matching the description, using only models this host can run. */
-export function rolePrompt(description: string, team: TeamOutline, catalog: readonly ProviderInfo[]): string {
-  const roles = team.roles.map((role) => `- ${role.name} (folders ${role.folders.length ? role.folders.join(", ") : "any"})`);
+/** Asks a planner to revise the current draft, keeping its orchestrator workspace fixed. */
+export function teamEditPrompt(request: string, draft: Team, catalog: readonly ProviderInfo[]): string {
   return [
-    "Propose one more role for this project's agent team in Paseo. The role runs in the orchestrator's workspace on its own provider and model; an orchestrator hands work to it.",
+    "Revise this project's entire agent team according to the user's request.",
     "",
-    `The role: ${description.trim()}`,
-    "",
-    `The team already has these roles, and the orchestrator uses the workspace "${team.orchestratorWorkspace}":`,
-    ...(roles.length ? roles : ["- (none yet)"]),
+    `User request: ${request.trim()}`,
+    "Current draft:",
+    JSON.stringify(draft, null, 2),
     "",
     "Providers and model ids available on this host (use these exact ids, nothing else):",
     ...modelLines(catalog),
     "",
     "Rules:",
-    "- Look around the repository to fit the role's folders to what is there. Do not create, change or delete any file.",
-    "- Use a short lowercase name different from the existing roles.",
-    "- Give it the folders it owns (relative paths, may be empty), avoiding folders other roles own, and one or two sentences of instructions.",
-    "- Pick the provider and model that suit this work best.",
-    "- Answer with JSON only, using exactly these keys and no others:",
-    JSON.stringify(ROLE_EXAMPLE, null, 2),
+    "- Look around the repository to ground the changes. Do not create, change or delete any file.",
+    "- Treat the request as an edit of the existing team. When it names an existing role, or the work fits an existing role's folders or responsibility, change that role's instructions, folders, provider/model or name instead of adding a role.",
+    '- For example, "add UI testing to tester" means update tester\'s instructions/folders; do not create a new role.',
+    "- Add a new role only when the request explicitly asks for a new or separate role, or when no existing role can own the work.",
+    "- Remove a role only when the request asks for it or its work is merged into another role by the request.",
+    '- A request may affect several roles at once: for example, "every role must run the tests" means change all of them.',
+    "- Keep roles the request does not affect exactly as they are. Change the orchestrator's provider/model and revise the goal when requested.",
+    `- Keep the orchestrator workspace exactly ${JSON.stringify(draft.orchestrator.workspace)} and version ${draft.version}.`,
+    "- Use only the listed provider/model ids and give each role a unique name.",
+    "- Answer with the full team JSON only, using exactly these keys and no others:",
+    JSON.stringify({ ...EXAMPLE, orchestrator: { ...EXAMPLE.orchestrator, workspace: draft.orchestrator.workspace } }, null, 2),
   ].join("\n");
-}
-
-/** Reads the role planner's final message as one role, tolerating a code fence or text around the JSON. */
-export function extractRole(message: string | null): { ok: true; role: Role } | { ok: false; errors: string[] } {
-  const json = jsonIn(message, "role");
-  if (!json.ok) return json;
-  const result = RoleSchema.safeParse(json.value);
-  if (result.success) return { ok: true, role: result.data };
-  return { ok: false, errors: result.error.issues.map((issue) => `${issue.path.join(".") || "role"}: ${issue.message}`) };
 }
 
 /** Asks a planner to improve one role's instructions without requiring a valid team draft. */

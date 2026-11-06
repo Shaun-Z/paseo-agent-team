@@ -29,7 +29,7 @@ request → orchestrator → roles (each with its own provider/model) → result
 
 - Review the names, models, folders and instructions of every role before you press **Apply**. Every role runs in the orchestrator's workspace.
 - A blank role is named `role`. If that name is already in use, it gets a `#` and four random uppercase hex characters, such as `role#4F2A`.
-- **Add role with AI**: describe a role in a sentence or two, and a planner proposes one more role for you to review.
+- **Edit team with AI**: type a request under the role list. A request that names a role, or whose work fits one, changes that role; a new role is added only when asked for or when no role fits. A planner proposes the revised team, which is applied to the draft at once with a notice of what changed. **Undo** and **Redo** step through AI edits. Nothing is written to the team file until you press **Apply**.
 - **Edit instructions** opens a dialog with the full instructions. **Improve with AI** asks an instructions planner to propose a rewrite, which you can apply or discard. **Save** only updates the draft; the team's file is written by **Apply**.
 - A proposal survives leaving the screen. When you reopen it, the plugin picks up the newest planner for that workspace or project, whether it is still running or ready to review.
 - Proposing again, or cancelling the review, archives the earlier planner.

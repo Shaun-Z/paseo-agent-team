@@ -6,9 +6,9 @@ import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/appl
 import { findOrchestrator, orchestratorsToArchive, teamAgentsToArchive, LABEL, pendingPlanners, PLANNER_WORKSPACE, plannerCleanup, PROPOSAL_FOR, proposalTarget } from "../shared/cleanup";
 import { CLAUDE_LOCAL_SETTINGS, needsCreateAgentPermission, needsRunPermission, PASEO_CREATE_AGENT_RULE, PASEO_RUN_RULE, withAllowRule } from "../shared/permissions";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
-import { extractInstructions, extractProposal, extractRole, INSTRUCTIONS_JSON_SCHEMA, instructionsPrompt, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
+import { extractInstructions, extractProposal, INSTRUCTIONS_JSON_SCHEMA, instructionsPrompt, plannerPrompt, teamEditPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
-import type { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "../shared/rpc";
+import type { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
 import { legacyWorkspacesOf, sameTeamFiles, teamFileFor, teamFileWorkspaces, teamIn, workspaceOwnerOf, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
 import { agentFeaturesOf, catalogFrom, roleModes, agentModeOf, type AgentFeatures, validateTeam, type ProviderEntry } from "../shared/validate";
@@ -254,25 +254,27 @@ export async function teamProposal({ agentId }: RpcInput<typeof teamProposalRpc>
   return { status: "done", team: parsed.team, validation: validateTeam(parsed.team, catalogFrom(await providerEntries(paseo))) };
 }
 
-export async function proposeRole({ description, team, ...target }: RpcInput<typeof teamRoleProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamRoleProposeRpc>> {
+export async function proposeTeamEdit({ request, team, ...target }: RpcInput<typeof teamEditProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamEditProposeRpc>> {
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
   const featureValues = await featuresFor(paseo, entries, provider, (await projectOf(paseo, target)).root);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
     config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!), ...(featureValues ? { featureValues } : {}) },
-    title: "Role planner",
-    prompt: rolePrompt(description, team, catalogFrom(entries)),
-    outputSchema: ROLE_JSON_SCHEMA,
+    title: "Team editor",
+    prompt: teamEditPrompt(request, team, catalogFrom(entries)),
+    outputSchema: TEAM_JSON_SCHEMA,
     labels: { [LABEL]: "planner" },
   });
   return { agentId: agent.id };
 }
 
-export async function roleProposal({ agentId }: RpcInput<typeof teamRoleProposalRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamRoleProposalRpc>> {
+export async function teamEditProposal({ agentId }: RpcInput<typeof teamEditProposalRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamEditProposalRpc>> {
   const result = await plannerAnswer(paseo, agentId);
   if (result.status !== "finished") return result;
-  const parsed = extractRole(result.message);
-  return parsed.ok ? { status: "done", role: parsed.role } : { status: "failed", errors: parsed.errors };
+  const parsed = extractProposal(result.message);
+  if (!parsed.ok) return { status: "failed", errors: parsed.errors };
+  await paseo.agents.ref(agentId).archive().catch(() => undefined);
+  return { status: "done", team: parsed.team, validation: validateTeam(parsed.team, catalogFrom(await providerEntries(paseo))) };
 }
 
 export async function improveInstructions({ role, request, team, ...target }: RpcInput<typeof teamInstructionsImproveRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamInstructionsImproveRpc>> {
