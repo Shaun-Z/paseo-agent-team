@@ -1499,6 +1499,19 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
               );
             })}
           </View>
+        </View>
+      </View>
+      <View
+        style={{
+          flexDirection: "row",
+          flexWrap: "wrap",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          paddingHorizontal: pad,
+          paddingTop: 12,
+          gap: 12,
+        }}
+      >
           <Pressable
             accessibilityRole="switch"
             accessibilityState={{ checked: state.showClosed }}
@@ -1542,12 +1555,11 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
             <Pressable
               accessibilityRole="button"
               onPress={() => setState({ ...state, dismissed: [...new Set([...state.dismissed, ...closedIds])] })}
-              style={{ marginLeft: "auto", paddingHorizontal: 8, paddingVertical: 4 }}
+              style={{ paddingHorizontal: 8, paddingVertical: 4 }}
             >
               <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("hideAllClosed", { count: closedIds.length })}</Text>
             </Pressable>
           ) : null}
-        </View>
       </View>
       <ScrollView
         horizontal
