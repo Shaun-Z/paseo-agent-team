@@ -1,7 +1,7 @@
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc, useTranslation } from "@getpaseo/plugin/client";
-import { Modal } from "@getpaseo/plugin/client/ui";
+import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -12,6 +12,7 @@ import { messages } from "./i18n";
 import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc } from "../shared/rpc";
 import { checkTeam, type Role, type Team } from "../shared/team";
 import { applyTeamEdit, summarizeTeamEdit } from "../shared/team-edit";
+import { providerIcon } from "../shared/provider-icons";
 import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
 
@@ -360,6 +361,58 @@ function InstructionsDialog({
   );
 }
 
+function TeamModel({ provider, model, colors, icons }: { provider: string; model: string; colors: Colors; icons: Map<string, string | undefined> }) {
+  const icon = providerIcon(provider, icons.get(provider));
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0, flexShrink: 1 }}>
+      <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: colors.surface2, alignItems: "center", justifyContent: "center" }}>
+        {icon.kind === "svg" ? <Icon icon={{ svg: icon.svg }} size={14} color={colors.foreground} /> : <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 12 }}>{icon.letter}</Text>}
+      </View>
+      <Text style={{ color: colors.foregroundMuted, fontSize: 12, flexShrink: 1 }}>{model}</Text>
+    </View>
+  );
+}
+
+function CurrentTeamTree({ team, s, colors, compact, icons }: { team: Team; s: Styles; colors: Colors; compact: boolean; icons: Map<string, string | undefined> }) {
+  const { t } = useTranslation(messages);
+  const [width, setWidth] = useState(0);
+  const stacked = compact || width < 560;
+  return (
+    <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ flexDirection: stacked ? "column" : "row", alignItems: stacked ? "stretch" : "center", gap: stacked ? 12 : 0 }}>
+      <View style={[s.orchestratorCard, { gap: 8, minWidth: 0, ...(stacked ? {} : { width: 200 }) }]}>
+        <Text style={{ color: colors.accent, fontSize: 11, fontWeight: "700" }}>{t("review.orchestrator")}</Text>
+        <Text style={[s.text, { fontWeight: "700" }]}>{team.orchestrator.workspace}</Text>
+        <TeamModel {...team.orchestrator} colors={colors} icons={icons} />
+      </View>
+      {!stacked && team.roles.length > 0 ? <View style={{ width: 20, height: 2, backgroundColor: colors.border }} /> : null}
+      <View style={{ flex: stacked ? undefined : 1, minWidth: 0, marginLeft: stacked ? 12 : 0 }}>
+        {team.roles.map((role, index) => (
+          <View key={role.name} style={{ flexDirection: "row", alignItems: "stretch" }}>
+            <View style={{ width: 18 }}>
+              <View style={{ position: "absolute", left: 0, top: index === 0 ? "50%" : 0, bottom: index === team.roles.length - 1 ? "50%" : 0, width: 2, backgroundColor: colors.border }} />
+              <View style={{ position: "absolute", left: 0, right: 0, top: "50%", height: 2, backgroundColor: colors.border }} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0, paddingVertical: 5 }}>
+              <View style={[s.card, { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, backgroundColor: colors.surface0 }]}>
+                <Text style={[s.text, { fontWeight: "700", minWidth: 88, maxWidth: "100%", flexShrink: 1 }]}>{role.name}</Text>
+                <TeamModel provider={role.provider} model={role.model} colors={colors} icons={icons} />
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, minWidth: 0, flexShrink: 1 }}>
+                  {(role.folders.length ? role.folders.slice(0, 3) : [t("current.noFolderLimit")]).map((folder, at) => (
+                    <View key={at} style={{ borderRadius: 5, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: colors.surface2, maxWidth: "100%" }}>
+                      <Text style={s.muted}>{folder}</Text>
+                    </View>
+                  ))}
+                  {role.folders.length > 3 ? <View style={{ borderRadius: 5, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: colors.surface2 }}><Text style={s.muted}>{t("current.moreFolders", { count: role.folders.length - 3 })}</Text></View> : null}
+                </View>
+              </View>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 type Applied = Extract<RpcOutput<typeof teamApplyRpc>, { ok: true }>;
 
 export const PROJECT_TEAMS_KEY = ["workspace-agents", "projects"] as const;
@@ -373,6 +426,9 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
   const { t } = useTranslation(messages);
   const queryClient = useQueryClient();
+  const paseo = usePaseo();
+  const providers = useQuery({ queryKey: ["dashboard", "providers"], queryFn: () => paseo.providers.snapshot() });
+  const providerIcons = useMemo(() => new Map((providers.data?.entries ?? []).map((provider) => [provider.provider, provider.iconSvg])), [providers.data]);
   const read = useRpc(teamReadRpc);
   const propose = useRpc(teamProposeRpc);
   const proposal = useRpc(teamProposalRpc);
@@ -588,17 +644,14 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
 
       {data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
       {data.team && !draft ? (
-        <View style={s.card}>
-          <Text style={s.text}>{t("current.orchestrator", { workspace: data.team.orchestrator.workspace, model: `${data.team.orchestrator.provider}/${data.team.orchestrator.model}` })}</Text>
-          {data.team.roles.map((role) => (
-            <Text key={role.name} style={s.text}>• {role.name} → {role.provider}/{role.model}{role.folders.length ? ` · ${role.folders.join(", ")}` : ""}</Text>
-          ))}
-          {data.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
-          <View style={s.row}>
+        <View style={[s.card, { maxWidth: 960, width: "100%", alignSelf: "flex-start" }]}>
+          <View style={[s.row, { justifyContent: "flex-end" }]}>
             <Button s={s} label={t("current.edit")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(data.team); }} />
             <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending || restarted.isPending} onPress={() => applied.mutate(data.team!)} />
             <Button s={s} secondary label={t("current.restart")} disabled={applied.isPending || restarted.isPending} onPress={() => setConfirmRestart(true)} />
           </View>
+          <CurrentTeamTree team={data.team} s={s} colors={theme.colors} compact={layout.compact} icons={providerIcons} />
+          {data.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
           <Text style={s.muted}>{t("current.restartHint")}</Text>
         </View>
       ) : null}

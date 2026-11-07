@@ -30,6 +30,12 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
   const { t } = useTranslation(messages);
   const projects = useProjectTeams();
+  const [listWidth, setListWidth] = useState(0);
+  const columns = layout.compact || listWidth < 720 ? 1 : listWidth < 1120 ? 2 : 3;
+  const projectRows = [];
+  for (let index = 0; index < (projects.data?.length ?? 0); index += columns) {
+    projectRows.push(projects.data!.slice(index, index + columns));
+  }
   const toast = useToast();
   const [projectId, setProjectId] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -105,19 +111,25 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
       <Text style={s.title}>{t("screen.title")}</Text>
       {projects.isLoading ? <Text style={s.muted}>{t("loading")}</Text> : null}
       {projects.error ? <Text style={s.danger}>{String(projects.error)}</Text> : null}
-      {projects.data?.map((project) => {
+      <View style={{ gap: 12 }} onLayout={(event) => {
+        const width = Math.round(event.nativeEvent.layout.width);
+        setListWidth((current) => current === width ? current : width);
+      }}>
+      {projectRows.map((row) => (
+        <View key={row[0]!.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+      {row.map((project) => {
         const occupiedWorkspaces = new Set(project.teams.map((team) => team.workspaceId).filter((id) => id != null));
         const reconnectWorkspaces = project.workspaces.filter((workspace) => !occupiedWorkspaces.has(workspace.id));
         return (
-        <View key={project.id} style={s.card}>
+        <View key={project.id} style={[s.card, { flex: 1, minWidth: 0 }]}>
           <Text style={s.text}>{project.name}</Text>
           <Text style={s.muted}>{project.root}</Text>
           {project.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
           {!project.teams.length ? <Text style={s.muted}>{t("screen.noTeams")}</Text> : null}
           {project.teams.map((team) => (
-            <View key={team.file} style={s.row}>
-              <Text style={s.text}>{team.orchestratorWorkspace}</Text>
-              {team.goal ? <Text style={s.muted}>{team.goal}</Text> : null}
+            <View key={team.file} style={[s.row, { minWidth: 0, maxWidth: "100%" }]}>
+              <Text style={[s.text, { flexShrink: 1, maxWidth: "100%" }]}>{team.orchestratorWorkspace}</Text>
+              {team.goal ? <Text style={[s.muted, { flexShrink: 1, maxWidth: "100%" }]}>{team.goal}</Text> : null}
               <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
               {!team.workspaceId ? <Text style={s.muted}>{t("screen.workspaceMissing")}</Text> : null}
               <Button s={s} secondary label={t("screen.openTeam")} disabled={!team.workspaceId} onPress={() => team.workspaceId && openTeamPanel?.(team.workspaceId)} />
@@ -158,6 +170,10 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
         </View>
         );
       })}
+          {Array.from({ length: columns - row.length }, (_, index) => <View key={`spacer-${index}`} style={{ flex: 1, minWidth: 0 }} />)}
+        </View>
+      ))}
+      </View>
     </ScrollView>
   );
 }
