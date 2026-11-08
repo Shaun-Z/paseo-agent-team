@@ -4,7 +4,8 @@ import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { withAlpha } from "../shared/color";
 import { messages } from "./i18n";
 import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
 import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
@@ -121,20 +122,39 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
         const occupiedWorkspaces = new Set(project.teams.map((team) => team.workspaceId).filter((id) => id != null));
         const reconnectWorkspaces = project.workspaces.filter((workspace) => !occupiedWorkspaces.has(workspace.id));
         return (
-        <View key={project.id} style={[s.card, { flex: 1, minWidth: 0 }]}>
-          <Text style={s.text}>{project.name}</Text>
-          <Text style={s.muted}>{project.root}</Text>
+        <View key={project.id} style={[s.card, { flex: 1, minWidth: 0, padding: 0, gap: 0, overflow: "hidden" }]}>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, backgroundColor: withAlpha(theme.colors.accent, 0.1), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.text, { fontSize: 17, fontWeight: "700" }]}>{project.name}</Text>
+              <Text style={[s.muted, { fontSize: 11 }]} numberOfLines={1}>{project.root}</Text>
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel={t("screen.newTeam")} onPress={() => setProjectId(project.id)}>
+              <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>{`+ ${t("screen.newTeam")}`}</Text>
+            </Pressable>
+          </View>
+          <View style={{ padding: 10, gap: 8 }}>
           {project.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
           {!project.teams.length ? <Text style={s.muted}>{t("screen.noTeams")}</Text> : null}
           {project.teams.map((team) => (
-            <View key={team.file} style={[s.row, { minWidth: 0, maxWidth: "100%" }]}>
-              <Text style={[s.text, { flexShrink: 1, maxWidth: "100%" }]}>{team.orchestratorWorkspace}</Text>
-              {team.goal ? <Text style={[s.muted, { flexShrink: 1, maxWidth: "100%" }]}>{team.goal}</Text> : null}
-              <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
-              {!team.workspaceId ? <Text style={s.muted}>{t("screen.workspaceMissing")}</Text> : null}
-              <Button s={s} secondary label={t("screen.openTeam")} disabled={!team.workspaceId} onPress={() => team.workspaceId && openTeamPanel?.(team.workspaceId)} />
-              {!team.workspaceId ? <Button s={s} secondary label={t("screen.reconnect")} disabled={reconnectBusy} onPress={() => { restored.reset(); setReconnecting(`${project.id}:${team.file}`); }} /> : null}
-              <Button s={s} secondary label={t("screen.deleteTeam")} disabled={deleted.isPending} onPress={() => setConfirming(`${project.id}:${team.file}`)} />
+            <View key={team.file} style={[s.card, { minWidth: 0, maxWidth: "100%", padding: 8, gap: 4, backgroundColor: theme.colors.surface2, borderLeftWidth: 3, borderLeftColor: team.workspaceId ? theme.colors.accent : theme.colors.statusWarning }]}>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                <Text style={[s.text, { flex: 1, minWidth: 0, fontSize: 14, fontWeight: "700" }]}>{team.orchestratorWorkspace}</Text>
+                <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
+              </View>
+              {team.goal ? <Text style={s.muted} numberOfLines={2}>{team.goal}</Text> : null}
+              {!team.workspaceId ? (
+                <View style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: theme.colors.statusWarning }}>
+                  <Text style={{ color: theme.colors.statusWarning, fontSize: 12, fontWeight: "600" }}>{t("screen.workspaceMissing")}</Text>
+                </View>
+              ) : null}
+              <View style={s.row}>
+                {team.workspaceId ? (
+                  <Button s={s} secondary label={t("screen.openTeam")} onPress={() => openTeamPanel?.(team.workspaceId!)} />
+                ) : (
+                  <Button s={s} label={t("screen.reconnect")} disabled={reconnectBusy} onPress={() => { restored.reset(); setReconnecting(`${project.id}:${team.file}`); }} />
+                )}
+                <Button s={s} secondary label={t("screen.deleteTeam")} disabled={deleted.isPending} onPress={() => setConfirming(`${project.id}:${team.file}`)} />
+              </View>
               {!team.workspaceId && reconnecting === `${project.id}:${team.file}` ? (
                 <View style={[s.card, { width: "100%" }]}>
                   <Text style={s.text}>{t("screen.reconnectPick")}</Text>
@@ -164,8 +184,6 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
               ) : null}
             </View>
           ))}
-          <View style={s.row}>
-            <Button s={s} label={t("screen.newTeam")} onPress={() => setProjectId(project.id)} />
           </View>
         </View>
         );
