@@ -1535,7 +1535,7 @@ export function AgentDashboardView(props: {
     reportClosed?.(closedIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closedKey]);
-  const pad = props.compact ? 16 : 24;
+  const pad = props.compact || props.embedded ? 16 : 24;
   const [panelWidth, setPanelWidth] = useState(0);
   const [expandedSubagents, setExpandedSubagents] = useState<
     Record<string, boolean>
@@ -1610,24 +1610,26 @@ export function AgentDashboardView(props: {
             </Text>
           ) : (
             <>
-              <View
-                style={{
-                  paddingHorizontal: TREE_PAD_X,
-                  paddingVertical: 12,
-                  gap: 26,
-                  alignItems: "flex-start",
-                }}
-              >
-                {forest.trees.map((node) => (
-                  <Tree
-                    key={node.agent.id}
-                    {...treeProps}
-                    node={node}
-                    root
-                    collapseRoot={collapseRoot}
-                  />
-                ))}
-              </View>
+              {forest.trees.length > 0 && (
+                <View
+                  style={{
+                    paddingHorizontal: TREE_PAD_X,
+                    paddingVertical: 12,
+                    gap: 26,
+                    alignItems: "flex-start",
+                  }}
+                >
+                  {forest.trees.map((node) => (
+                    <Tree
+                      key={node.agent.id}
+                      {...treeProps}
+                      node={node}
+                      root
+                      collapseRoot={collapseRoot}
+                    />
+                  ))}
+                </View>
+              )}
               {forest.solo.length > 0 && (
                 <View
                   style={{
@@ -1674,7 +1676,7 @@ export function AgentDashboardView(props: {
         onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)}
       >
         {props.embedded ? (
-          <View style={{ flexGrow: 1, flexShrink: 0, padding: pad, gap: 24 }}>{content}</View>
+          <View style={{ flexGrow: 1, flexShrink: 0, padding: pad, gap: 16 }}>{content}</View>
         ) : (
           <ScrollView
             style={{ flexGrow: 1, flexShrink: 0 }}
