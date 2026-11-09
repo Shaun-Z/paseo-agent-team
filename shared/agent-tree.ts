@@ -25,7 +25,8 @@ export interface DashboardAgent {
 }
 
 export type AgentKind = "orchestrator" | "planner" | "role" | "agent" | "subagent";
-export type AgentBadge = "attention" | "running" | "done" | null;
+/** "question" waits on the user's answer to a permission prompt; "attention" stopped on an error. */
+export type AgentBadge = "question" | "attention" | "running" | "done" | null;
 
 export interface AgentNode {
   agent: DashboardAgent;
@@ -67,9 +68,9 @@ export function isHidden(agent: DashboardAgent): boolean {
   return agent.status === "closed" || (!agent.subagent && !!agent.archivedAt);
 }
 
-/** Only finished, inactive sessions can be dismissed from this dashboard tab. */
+/** Only finished, inactive sessions that need nothing from the user can be dismissed from this dashboard tab. */
 export function canDismiss(node: AgentNode): boolean {
-  return !node.waiting && !node.live && !node.delegating && node.badge !== "attention" &&
+  return !node.waiting && !node.live && !node.delegating && node.badge !== "attention" && node.badge !== "question" &&
     (isHidden(node.agent) || (node.agent.subagent === true && node.agent.status !== "running"));
 }
 
@@ -78,6 +79,54 @@ export function canArchive(node: AgentNode): boolean {
   const { agent } = node;
   return !agent.subagent && !agent.archivedAt && !node.waiting && !node.live && !node.delegating &&
     (agent.status === "error" || (agent.requiresAttention === true && agent.attentionReason === "error"));
+}
+
+/** Like the card badge, agents waiting on a permission prompt or stopped on an error await the user even while running; other running agents are working. */
+export function agentActivity(agent: DashboardAgent): "working" | "awaiting" | "idle" {
+  if (agent.status === "error" || (agent.requiresAttention && (agent.attentionReason === "permission" || agent.attentionReason === "error"))) return "awaiting";
+  if (agent.status === "running") return "working";
+  return "idle";
+}
+
+/** Activity totals of Paseo agents that are not archived; provider sub-agents are not counted. */
+export function activityCounts(agents: readonly DashboardAgent[]): { working: number; awaiting: number; idle: number } {
+  const counts = { working: 0, awaiting: 0, idle: 0 };
+  for (const agent of agents) {
+    if (!agent.archivedAt && !agent.subagent) counts[agentActivity(agent)]++;
+  }
+  return counts;
+}
+
+export type ActivityFilter = "all" | "working" | "awaiting" | "idle";
+
+/** The activities of a tree's root and all its descendants; waiting roster nodes are not agents and are skipped. */
+export function treeActivities(node: AgentNode): Set<"working" | "awaiting" | "idle"> {
+  const result = new Set<"working" | "awaiting" | "idle">();
+  const visit = (current: AgentNode) => {
+    if (!current.waiting) result.add(agentActivity(current.agent));
+    current.children.forEach(visit);
+  };
+  visit(node);
+  return result;
+}
+
+/** Whole trees and solo roots with at least one agent of the filtered activity; "all" keeps the forest as is. */
+export function filterForest(forest: AgentForest, filter: ActivityFilter): AgentForest {
+  if (filter === "all") return forest;
+  const keep = (node: AgentNode) => treeActivities(node).has(filter);
+  return { trees: forest.trees.filter(keep), solo: forest.solo.filter(keep) };
+}
+
+/** Root counts across forests: all roots, and per activity the roots whose tree contains it (a tree can count in several). */
+export function forestActivityCounts(forests: readonly AgentForest[]): { all: number; working: number; awaiting: number; idle: number } {
+  const counts = { all: 0, working: 0, awaiting: 0, idle: 0 };
+  for (const forest of forests) {
+    for (const node of [...forest.trees, ...forest.solo]) {
+      counts.all++;
+      for (const activity of treeActivities(node)) counts[activity]++;
+    }
+  }
+  return counts;
 }
 
 /** Dismissible sessions in depth-first tree order, followed by solo trees, without duplicate ids. */
@@ -100,7 +149,8 @@ function kindOf(agent: DashboardAgent): AgentKind {
 }
 
 function badgeOf(agent: DashboardAgent): AgentBadge {
-  if (agent.requiresAttention && (agent.attentionReason === "permission" || agent.attentionReason === "error")) return "attention";
+  if (agent.requiresAttention && agent.attentionReason === "permission") return "question";
+  if (agent.requiresAttention && agent.attentionReason === "error") return "attention";
   if (agent.status === "error") return "attention";
   if (agent.status === "running") return "running";
   if (agent.requiresAttention && agent.attentionReason === "finished") return "done";
@@ -217,7 +267,7 @@ export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds
     else roots.push(agent);
   }
   const waiting = waitingRoles(scope, options.roster ?? []);
-  const active = (node: AgentNode) => node.live || node.badge === "attention";
+  const active = (node: AgentNode) => node.live || node.badge === "attention" || node.badge === "question";
   const typeOf = (node: AgentNode) => node.role ?? (node.agent.subagent ? node.agent.subagentType : null) ?? node.kind;
   const activeBranches = new Set<string>();
   const build = (agent: DashboardAgent): AgentNode => {

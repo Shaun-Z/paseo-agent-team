@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentNode, buildAgentForest, canArchive, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
+import { activityCounts, agentActivity, filterForest, forestActivityCounts, treeActivities, agentNode, buildAgentForest, canArchive, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
 import { PROVIDER_LOGOS, providerIcon } from "../shared/provider-icons";
 
 const PARENT = "paseo.parent-agent-id";
@@ -165,13 +165,14 @@ describe("agentNode", () => {
   describe("badge and live", () => {
     const badge = (over: Partial<DashboardAgent>) => agentNode(agent("a", over)).badge;
 
-    it("is attention for a permission or error request", () => {
-      expect(badge({ requiresAttention: true, attentionReason: "permission" })).toBe("attention");
+    it("is question for a permission request and attention for an error request", () => {
+      expect(badge({ requiresAttention: true, attentionReason: "permission" })).toBe("question");
       expect(badge({ requiresAttention: true, attentionReason: "error" })).toBe("attention");
     });
 
-    it("keeps attention over running", () => {
-      expect(badge({ status: "running", requiresAttention: true, attentionReason: "permission" })).toBe("attention");
+    it("keeps question over running", () => {
+      expect(badge({ status: "running", requiresAttention: true, attentionReason: "permission" })).toBe("question");
+      expect(badge({ status: "running", requiresAttention: true, attentionReason: "error" })).toBe("attention");
     });
 
     it("is attention for status error", () => {
@@ -882,5 +883,149 @@ describe("canArchive", () => {
     expect(canArchive(node({ status: "closed" }))).toBe(false);
     expect(canArchive(node({}))).toBe(false);
     expect(canArchive(node({ requiresAttention: true, attentionReason: "finished" }))).toBe(false);
+  });
+});
+
+describe("agentActivity", () => {
+  it("agentActivity is working for a running agent", () => {
+    expect(agentActivity(agent("a", { status: "running" }))).toBe("working");
+    expect(agentActivity(agent("a", { status: "running", requiresAttention: true, attentionReason: "finished" }))).toBe("working");
+  });
+
+  it("agentActivity is awaiting for a running agent with a permission prompt", () => {
+    expect(agentActivity(agent("a", { status: "running", requiresAttention: true, attentionReason: "permission" }))).toBe("awaiting");
+  });
+
+  it("agentActivity is awaiting for status error", () => {
+    expect(agentActivity(agent("a", { status: "error" }))).toBe("awaiting");
+  });
+
+  it("agentActivity is awaiting when attention is requested because of an error", () => {
+    expect(agentActivity(agent("a", { requiresAttention: true, attentionReason: "error" }))).toBe("awaiting");
+    expect(agentActivity(agent("a", { status: "running", requiresAttention: true, attentionReason: "error" }))).toBe("awaiting");
+  });
+
+  it("agentActivity is idle for idle, closed and finished-attention agents", () => {
+    expect(agentActivity(agent("a"))).toBe("idle");
+    expect(agentActivity(agent("a", { status: "closed" }))).toBe("idle");
+    expect(agentActivity(agent("a", { status: "initializing" }))).toBe("idle");
+    expect(agentActivity(agent("a", { requiresAttention: true, attentionReason: "finished" }))).toBe("idle");
+    expect(agentActivity(agent("a", { requiresAttention: false, attentionReason: "permission" }))).toBe("idle");
+  });
+
+  it("agentActivity counts skip archived agents and provider sub-agents and count the rest", () => {
+    const archivedAt = "2026-10-30T01:00:00Z";
+    const agents = [
+      agent("run1", { status: "running" }),
+      agent("run2", { status: "running" }),
+      agent("perm", { status: "running", requiresAttention: true, attentionReason: "permission" }),
+      agent("err", { status: "error" }),
+      agent("idle"),
+      agent("closed", { status: "closed" }),
+      agent("archived-run", { status: "running", archivedAt }),
+      agent("archived-err", { status: "error", archivedAt }),
+      agent("sub-run", { status: "running", subagent: true }),
+      agent("sub-idle", { subagent: true }),
+    ];
+    expect(activityCounts(agents)).toEqual({ working: 2, awaiting: 2, idle: 2 });
+    expect(activityCounts([])).toEqual({ working: 0, awaiting: 0, idle: 0 });
+  });
+});
+
+describe("question badge", () => {
+  const scope = ["wks_a"];
+  const question = { requiresAttention: true, attentionReason: "permission" };
+  const kids = (agents: DashboardAgent[]) => ids(buildAgentForest(agents, scope, hide).trees[0]?.children ?? []);
+
+  it("canDismiss is false for a question node, even a closed or archived one", () => {
+    expect(canDismiss(agentNode(agent("n", { status: "closed", ...question })))).toBe(false);
+    expect(canDismiss(agentNode(agent("n", { archivedAt: "2026-10-30T01:00:00Z", ...question })))).toBe(false);
+  });
+
+  it("buildAgentForest keeps a question child next to the newest idle one when Show closed is off", () => {
+    const agents = [
+      agent("p"),
+      child("ask", "p", { ...question, labels: { role: "qa" }, createdAt: at(1) }),
+      child("old", "p", { labels: { role: "qa" }, createdAt: at(2) }),
+      child("new", "p", { labels: { role: "qa" }, createdAt: at(3) }),
+    ];
+    expect(kids(agents)).toEqual(["ask", "new"]);
+  });
+
+  it("buildAgentForest keeps the chain to a question descendant when Show closed is off", () => {
+    const agents = [
+      agent("p"),
+      child("mid", "p", { labels: { role: "qa" }, createdAt: at(1) }),
+      child("ask", "mid", { ...question }),
+      child("new", "p", { labels: { role: "qa" }, createdAt: at(2) }),
+    ];
+    const tree = buildAgentForest(agents, scope, hide).trees[0]!;
+    expect(ids(tree.children)).toEqual(["mid", "new"]);
+    expect(ids(tree.children[0]!.children)).toEqual(["ask"]);
+  });
+
+  it("canArchive stays false for a permission prompt, running or not", () => {
+    expect(canArchive(agentNode(agent("n", question)))).toBe(false);
+    expect(canArchive(agentNode(agent("n", { status: "running", ...question })))).toBe(false);
+  });
+});
+
+describe("activity filters", () => {
+  const scope = ["wks_a"];
+  const LABEL = "workspace-agents";
+  const ask = { requiresAttention: true, attentionReason: "permission" };
+  const forestOf = (agents: DashboardAgent[], roster?: Parameters<typeof buildAgentForest>[2]["roster"]) => buildAgentForest(agents, scope, { showClosed: true, roster });
+  const rootIds = (forest: ReturnType<typeof buildAgentForest>) => [...ids(forest.trees), ...ids(forest.solo)].sort();
+
+  const first = forestOf([
+    agent("t-work"), child("w", "t-work", { status: "running", labels: { role: "a" } }), child("i", "t-work", { labels: { role: "b" } }),
+    agent("t-idle"), child("c", "t-idle", { labels: { role: "a" } }),
+    agent("t-ask"), child("ask", "t-ask", { ...ask, labels: { role: "a" } }),
+    agent("s-run", { status: "running" }),
+    agent("s-idle"),
+  ]);
+  const second = forestOf([agent("u", { status: "running" }), child("u-kid", "u")]);
+  const nodeOf = (forest: ReturnType<typeof buildAgentForest>, id: string) => [...forest.trees, ...forest.solo].find((node) => node.agent.id === id)!;
+
+  it("treeActivities collects the root's and every descendant's activity", () => {
+    expect([...treeActivities(nodeOf(first, "t-work"))].sort()).toEqual(["idle", "working"]);
+    expect([...treeActivities(nodeOf(first, "t-idle"))]).toEqual(["idle"]);
+    expect([...treeActivities(nodeOf(first, "t-ask"))].sort()).toEqual(["awaiting", "idle"]);
+    expect([...treeActivities(nodeOf(first, "s-run"))]).toEqual(["working"]);
+  });
+
+  it("treeActivities skips waiting roster nodes", () => {
+    const roster = [{ orchestratorWorkspaceId: "wks_a", roles: [{ name: "builder", provider: "codex", model: "m", workspaceId: "wks_a" }] }];
+    const lead = forestOf([agent("o", { labels: { [LABEL]: "orchestrator" }, status: "running" })], roster).trees[0]!;
+    expect(lead.children.some((kid) => kid.waiting)).toBe(true);
+    expect([...treeActivities(lead)]).toEqual(["working"]);
+  });
+
+  it("filterForest all returns the forest unchanged", () => {
+    expect(filterForest(first, "all")).toBe(first);
+  });
+
+  it("filterForest working keeps whole trees and solo roots with a running agent anywhere, children intact", () => {
+    const result = filterForest(first, "working");
+    expect(rootIds(result)).toEqual(["s-run", "t-work"]);
+    expect(result.trees[0]).toBe(nodeOf(first, "t-work"));
+    expect(ids(result.trees[0]!.children).sort()).toEqual(["i", "w"]);
+    expect(ids(result.solo)).toEqual(["s-run"]);
+  });
+
+  it("filterForest awaiting picks a tree whose child waits on a permission prompt", () => {
+    const result = filterForest(first, "awaiting");
+    expect(rootIds(result)).toEqual(["t-ask"]);
+    expect(ids(result.trees[0]!.children)).toEqual(["ask"]);
+    expect(result.solo).toEqual([]);
+  });
+
+  it("filterForest idle keeps every root with an idle agent in it", () => {
+    expect(rootIds(filterForest(first, "idle"))).toEqual(["s-idle", "t-ask", "t-idle", "t-work"]);
+  });
+
+  it("forestActivityCounts counts all roots over several forests and a tree in several statuses", () => {
+    expect(forestActivityCounts([first, second])).toEqual({ all: 6, working: 3, awaiting: 1, idle: 5 });
+    expect(forestActivityCounts([])).toEqual({ all: 0, working: 0, awaiting: 0, idle: 0 });
   });
 });

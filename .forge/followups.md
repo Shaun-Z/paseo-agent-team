@@ -55,3 +55,11 @@
 <!-- followup: fu-ed054f0ae86b | source: agent-teams-screen-visual-hierarchy | task: 17 | date: 2026-11-08 | status: open | taken: - -->
 - 공용 Button에 작은 크기(compact) 옵션을 추가해 Agent teams 팀 행의 팀 열기·재연결·삭제 버튼도 한 단계 줄인다. 시안 A가 요청한 "버튼도 작게"가 빠져 있다.
   Evidence: ui#2B7D 보고 — 공용 Button에 compact 옵션이 없어 버튼 크기를 그대로 두었다(run.md S1 ⚠).
+
+<!-- followup: fu-5355074dacb2 | source: all-agents-dashboard-tab | task: 19 | date: 2026-11-09 | status: open | taken: - -->
+- 전체 에이전트 탭은 모든 프로젝트의 미보관 에이전트마다 하위 에이전트 탐지용 타임라인(최근 200개)을 읽는다. 에이전트가 많은 호스트에서 데몬 부하(지난 RPC 폭주와 같은 계열)를 측정하고, 필요하면 열린 섹션만 읽거나 상한을 둔다.
+  Evidence: S3 구현은 기존 대시보드의 subagents 쿼리를 프로젝트 섹션마다 쓴다. README Limitations에 이미 "에이전트 수만큼 요청"이 적혀 있다.
+
+<!-- followup: fu-df3401582691 | source: all-agents-dashboard-tab | task: 19 | date: 2026-11-09 | status: open | taken: - -->
+- 전체 에이전트 탭의 밀도·닫힌 에이전트 표시·숨긴 목록이 화면을 떠나면 초기화된다. 호스트 단위 플러그인 설정(registerSettings)이나 다른 저장소로 유지할지 검토한다.
+  Evidence: S3는 TeamScreen의 React state로 보관(화면에는 패널 탭 상태가 없음).

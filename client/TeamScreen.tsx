@@ -6,8 +6,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { withAlpha } from "../shared/color";
+import { activityCounts, filterForest, forestActivityCounts, type ActivityFilter, type AgentForest } from "../shared/agent-tree";
 import { messages } from "./i18n";
 import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
+import { AgentDashboardView, ClosedControls, DEFAULT_STATE, DensityToggle, useDashboardData, type DashboardState } from "./AgentDashboard";
 import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
 
 export const SCREEN_ID = "team";
@@ -39,6 +41,32 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
   }
   const toast = useToast();
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [tab, setTab] = useState<"teams" | "agents">("teams");
+  const [dashState, setDashState] = useState<DashboardState>(DEFAULT_STATE);
+  const dashboard = useDashboardData(dashState.showClosed);
+  const [closedByProject, setClosedByProject] = useState<Record<string, string[]>>({});
+  const allAgents = useMemo(() => (dashboard.agents.data?.entries ?? []).map((entry) => entry.agent), [dashboard.agents.data]);
+  const agentCounts = activityCounts(allAgents);
+  const agentTotal = agentCounts.working + agentCounts.awaiting + agentCounts.idle;
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
+  const [forestByProject, setForestByProject] = useState<Record<string, AgentForest>>({});
+  const agentSections = useMemo(() => (projects.data ?? []).flatMap((project) => {
+    const ids = project.workspaces.map((workspace) => workspace.id);
+    const scope = new Set(ids);
+    return allAgents.some((agent) => scope.has(agent.workspaceId ?? "") && (dashState.showClosed || !agent.archivedAt)) ? [{ project, ids }] : [];
+  }), [projects.data, allAgents, dashState.showClosed]);
+  const counts = forestActivityCounts(agentSections.flatMap(({ project }) => forestByProject[project.id] ?? []));
+  // A section is shown unless its forest is known and has no tree matching the filter; hidden ones stay mounted so they keep reporting.
+  const shownSections = agentSections.filter(({ project }) => {
+    const forest = forestByProject[project.id];
+    if (!forest) return activityFilter === "all";
+    const filtered = filterForest(forest, activityFilter);
+    return filtered.trees.length + filtered.solo.length > 0 || activityFilter === "all";
+  });
+  const hiddenSections = agentSections.filter((section) => !shownSections.includes(section));
+  const agentRows = [];
+  for (let index = 0; index < shownSections.length; index += columns) agentRows.push(shownSections.slice(index, index + columns));
+  const closedIds = useMemo(() => [...new Set(Object.values(closedByProject).flat())], [closedByProject]);
   const queryClient = useQueryClient();
   const remove = useRpc(teamDeleteRpc);
   const reconnect = useRpc(teamReconnectRpc);
@@ -107,12 +135,89 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
     );
   }
 
+  const renderSection = ({ project, ids }: { project: (typeof agentSections)[number]["project"]; ids: string[] }) => (
+                  <View key={project.id} style={[s.card, { flex: 1, minWidth: 0, padding: 0, gap: 0, overflow: "hidden" }]}>
+                    <View style={{ padding: 12, backgroundColor: withAlpha(theme.colors.accent, 0.1), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+                      <Text style={[s.text, { fontSize: 17, fontWeight: "700" }]}>{project.name}</Text>
+                      <Text style={[s.muted, { fontSize: 11 }]} numberOfLines={1}>{project.root}</Text>
+                    </View>
+                    <AgentDashboardView
+                      data={dashboard}
+                      workspaceIds={ids}
+                      rosterWorkspaceId={ids[0] ?? null}
+                      state={dashState}
+                      setState={setDashState}
+                      colors={theme.colors}
+                      compact={layout.compact}
+                      open={navigation ? (id: string) => navigation.openAgent({ agentId: id }) : undefined}
+                      embedded
+                      activityFilter={activityFilter}
+                      reportForest={(forest) => setForestByProject((current) => current[project.id] === forest ? current : { ...current, [project.id]: forest })}
+                      reportClosed={(closed) => setClosedByProject((current) => current[project.id]?.join("\n") === closed.join("\n") ? current : { ...current, [project.id]: closed })}
+                    />
+                  </View>
+  );
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
       <Text style={s.title}>{t("screen.title")}</Text>
+      <View style={[s.row, { gap: 8 }]}>
+        {(["teams", "agents"] as const).map((id) => (
+          <Pressable
+            key={id}
+            accessibilityRole="button"
+            accessibilityState={{ selected: tab === id }}
+            onPress={() => setTab(id)}
+            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: tab === id ? theme.colors.accent : theme.colors.surface1, borderWidth: 1, borderColor: tab === id ? theme.colors.accent : theme.colors.border }}
+          >
+            <Text style={{ color: tab === id ? theme.colors.accentForeground : theme.colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>
+              {id === "teams" ? t("screen.tabTeams") : t("screen.allAgents", { count: agentTotal })}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
       {projects.isLoading ? <Text style={s.muted}>{t("loading")}</Text> : null}
       {projects.error ? <Text style={s.danger}>{String(projects.error)}</Text> : null}
-      <View style={{ gap: 12 }} onLayout={(event) => {
+      {tab === "agents" ? (
+        <>
+          <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <View style={[s.row, { gap: 8 }]}>
+              {(["all", "working", "awaiting", "idle"] as const).map((id) => (
+                <Pressable
+                  key={id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: activityFilter === id }}
+                  onPress={() => setActivityFilter(id)}
+                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: activityFilter === id ? theme.colors.accent : theme.colors.surface1, borderWidth: 1, borderColor: activityFilter === id ? theme.colors.accent : theme.colors.border }}
+                >
+                  <Text style={{ color: activityFilter === id ? theme.colors.accentForeground : theme.colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>
+                    {t(id === "all" ? "screen.filterAll" : `screen.${id}`, { count: counts[id] })}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", gap: 12 }}>
+              <DensityToggle colors={theme.colors} state={dashState} setState={setDashState} />
+              <View style={{ marginTop: -12 }}>
+                <ClosedControls colors={theme.colors} state={dashState} setState={setDashState} closedIds={closedIds} pad={0} />
+              </View>
+            </View>
+          </View>
+          {agentSections.length > 0 && shownSections.length === 0 ? <Text style={s.muted}>{t("screen.noMatchingAgents")}</Text> : null}
+          <View style={{ gap: 12 }} onLayout={(event) => {
+            const width = Math.round(event.nativeEvent.layout.width);
+            setListWidth((current) => current === width ? current : width);
+          }}>
+            {agentRows.map((row) => (
+              <View key={row[0]!.project.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+                {row.map(renderSection)}
+                {Array.from({ length: columns - row.length }, (_, index) => <View key={`spacer-${index}`} style={{ flex: 1, minWidth: 0 }} />)}
+              </View>
+            ))}
+          </View>
+          {hiddenSections.length ? <View style={{ display: "none" }}>{hiddenSections.map(renderSection)}</View> : null}
+        </>
+      ) : null}
+      {tab === "teams" ? <View style={{ gap: 12 }} onLayout={(event) => {
         const width = Math.round(event.nativeEvent.layout.width);
         setListWidth((current) => current === width ? current : width);
       }}>
@@ -191,7 +296,7 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
           {Array.from({ length: columns - row.length }, (_, index) => <View key={`spacer-${index}`} style={{ flex: 1, minWidth: 0 }} />)}
         </View>
       ))}
-      </View>
+      </View> : null}
     </ScrollView>
   );
 }
