@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentNode, buildAgentForest, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
+import { agentNode, buildAgentForest, canArchive, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
 import { PROVIDER_LOGOS, providerIcon } from "../shared/provider-icons";
 
 const PARENT = "paseo.parent-agent-id";
@@ -832,5 +832,55 @@ describe("dismissibleIds", () => {
     [...again.trees, ...again.solo].forEach(visit);
     expect(remaining).toEqual([]);
     expect(dismissibleIds(again)).toEqual([]);
+  });
+});
+
+describe("canArchive", () => {
+  const node = (over: Partial<DashboardAgent>, children: AgentNode[] = []) => agentNode(agent("n", over), children);
+
+  it("canArchive is true for an agent with status error", () => {
+    expect(canArchive(node({ status: "error" }))).toBe(true);
+  });
+
+  it("canArchive is true for an idle agent that requires attention because of an error", () => {
+    expect(canArchive(node({ requiresAttention: true, attentionReason: "error" }))).toBe(true);
+  });
+
+  it("canArchive is false for a permission prompt", () => {
+    expect(canArchive(node({ requiresAttention: true, attentionReason: "permission" }))).toBe(false);
+  });
+
+  it("canArchive is false for a running agent, even with an error attention", () => {
+    expect(canArchive(node({ status: "running" }))).toBe(false);
+    expect(canArchive(node({ status: "running", requiresAttention: true, attentionReason: "error" }))).toBe(false);
+  });
+
+  it("canArchive is false for a delegating node: an error agent with a running child", () => {
+    const parent = node({ status: "error" }, [agentNode(agent("r", { status: "running" }))]);
+    expect(parent.delegating).toBe(true);
+    expect(canArchive(parent)).toBe(false);
+  });
+
+  it("canArchive is false for a waiting roster node", () => {
+    const roster = [{ orchestratorWorkspaceId: "wks_a", roles: [{ name: "builder", provider: "codex", model: "m", workspaceId: "wks_a" }] }];
+    const { trees } = buildAgentForest([agent("o", { labels: { "workspace-agents": "orchestrator" } })], ["wks_a"], { showClosed: false, roster });
+    const waiting = trees[0]!.children[0]!;
+    expect(waiting.waiting).toBe(true);
+    expect(canArchive(waiting)).toBe(false);
+  });
+
+  it("canArchive is false for a provider sub-agent, even one with status error", () => {
+    expect(canArchive(node({ subagent: true, status: "error" }))).toBe(false);
+    expect(canArchive(node({ subagent: true, requiresAttention: true, attentionReason: "error" }))).toBe(false);
+  });
+
+  it("canArchive is false for an already archived error agent", () => {
+    expect(canArchive(node({ status: "error", archivedAt: "2026-10-30T01:00:00Z" }))).toBe(false);
+  });
+
+  it("canArchive is false for a closed agent and for a normal idle agent", () => {
+    expect(canArchive(node({ status: "closed" }))).toBe(false);
+    expect(canArchive(node({}))).toBe(false);
+    expect(canArchive(node({ requiresAttention: true, attentionReason: "finished" }))).toBe(false);
   });
 });

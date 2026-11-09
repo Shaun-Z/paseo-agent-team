@@ -1,7 +1,7 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTabState, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { z } from "zod";
 import { withAlpha } from "../shared/color";
-import { buildAgentForest, canDismiss, dismissibleIds, titleParts, type AgentNode } from "../shared/agent-tree";
+import { buildAgentForest, canArchive, canDismiss, dismissibleIds, titleParts, type AgentNode } from "../shared/agent-tree";
 import {
   DASHBOARD_DENSITIES,
   DEFAULT_DENSITY,
@@ -58,6 +58,7 @@ type TreeProps = {
   waitingLabel: string;
   hideLabel: string;
   dismiss?: (id: string) => void;
+  archive: { label: string; errorLabel: string; pending: boolean; errorId: string | null; run: (id: string) => void };
   subagentLabel: (count: number) => string;
   expandedSubagents: Record<string, boolean>;
   toggleSubagents: (id: string) => void;
@@ -578,6 +579,23 @@ function Card(
       <Text style={{ color: colors.foregroundMuted, fontSize: 12, lineHeight: 14 }}>×</Text>
     </Pressable>
   ) : null;
+  const archiving = props.archive;
+  const archiveButton = canArchive(node) ? (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={archiving.label}
+        disabled={archiving.pending}
+        onPress={(event) => { event.stopPropagation(); archiving.run(node.agent.id); }}
+        style={{ position: "absolute", bottom: -8, right: 6, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, backgroundColor: colors.surface1, opacity: archiving.pending ? 0.5 : 1 }}
+      >
+        <Text style={{ color: colors.foregroundMuted, fontSize: 11, lineHeight: 13, textDecorationLine: "underline" }}>{archiving.label}</Text>
+      </Pressable>
+      {archiving.errorId === node.agent.id ? (
+        <Text numberOfLines={1} style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, color: colors.statusDanger, fontSize: 11 }}>{archiving.errorLabel}</Text>
+      ) : null}
+    </>
+  ) : null;
   const card =
     open && !node.waiting && node.kind !== "subagent" ? (
       <Pressable
@@ -588,11 +606,13 @@ function Card(
       >
         {content}
         {hideButton}
+        {archiveButton}
       </Pressable>
     ) : (
       <View accessibilityLabel={node.title} style={style}>
         {content}
         {hideButton}
+        {archiveButton}
       </View>
     );
   if (!node.live) {
@@ -1156,6 +1176,10 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
   const client = useQueryClient();
   const { t } = useTranslation(messages);
   const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
+  const archived = useMutation({
+    mutationFn: (id: string) => paseo.agents.ref(id).archive(),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["dashboard", "agents"] }),
+  });
   const [live, setLive] = useState<Record<string, ProviderSubagent>>({});
   const flow = useRef(new Animated.Value(0)).current;
   const glow = useRef(new Animated.Value(0)).current;
@@ -1414,6 +1438,13 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
             : node.agent.provider),
     waitingLabel: t("waiting"),
     hideLabel: t("hideAgent"),
+    archive: {
+      label: t("archiveAgent"),
+      errorLabel: t("archiveFailed"),
+      pending: archived.isPending,
+      errorId: archived.isError ? archived.variables ?? null : null,
+      run: (id: string) => archived.mutate(id),
+    },
     dismiss: state.showClosed ? (id: string) => setState({ ...state, dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed, id] }) : undefined,
     subagentLabel: (count: number) => t("subagentCount", { count }),
     expandedSubagents,

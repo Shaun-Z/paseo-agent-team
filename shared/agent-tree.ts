@@ -73,6 +73,13 @@ export function canDismiss(node: AgentNode): boolean {
     (isHidden(node.agent) || (node.agent.subagent === true && node.agent.status !== "running"));
 }
 
+/** A Paseo agent that stopped on an error and is not archived yet can be archived; permission prompts and provider sub-agents cannot. */
+export function canArchive(node: AgentNode): boolean {
+  const { agent } = node;
+  return !agent.subagent && !agent.archivedAt && !node.waiting && !node.live && !node.delegating &&
+    (agent.status === "error" || (agent.requiresAttention === true && agent.attentionReason === "error"));
+}
+
 /** Dismissible sessions in depth-first tree order, followed by solo trees, without duplicate ids. */
 export function dismissibleIds(forest: AgentForest): string[] {
   const ids = new Set<string>();
