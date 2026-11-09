@@ -51,3 +51,7 @@
 <!-- followup: fu-b22ddb3a5c98 | source: team-edit-with-ai | task: 15 | date: 2026-11-06 | status: open | taken: - -->
 - tests/daemon.e2e.test.ts에서 지운 "proposes one role from a description" 케이스 대신 team.edit.propose/proposal을 실제 데몬으로 돌리는 E2E 케이스를 추가한다.
   Evidence: S2에서 role planner E2E 케이스를 제거했고 대체 E2E는 없다(PASEO_E2E는 토큰 비용 때문에 이번 범위에서 제외).
+
+<!-- followup: fu-ed054f0ae86b | source: agent-teams-screen-visual-hierarchy | task: 17 | date: 2026-11-08 | status: open | taken: - -->
+- 공용 Button에 작은 크기(compact) 옵션을 추가해 Agent teams 팀 행의 팀 열기·재연결·삭제 버튼도 한 단계 줄인다. 시안 A가 요청한 "버튼도 작게"가 빠져 있다.
+  Evidence: ui#2B7D 보고 — 공용 Button에 compact 옵션이 없어 버튼 크기를 그대로 두었다(run.md S1 ⚠).
