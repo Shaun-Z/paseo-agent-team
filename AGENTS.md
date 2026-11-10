@@ -2,7 +2,7 @@
 
 This file provides guidance to Coding Agents when working with code in this repository.
 
-A Paseo plugin (`paseo-plugin.json`, id `paseo-agent-team`) that turns a Paseo project into an agent team: each role gets its own provider/model, every role runs in the orchestrator's workspace (one workspace per team), and the orchestrator agent delegates to them. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the older single `.agents/team.json` is still read), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
+A Paseo plugin (`paseo-plugin.json`, id `paseo-agent-team`) for user-configured teams: extensible Roles define local prompts, members select Paseo Agent Profile launch settings, and one selected member is the Orchestrator. All members run independent reusable sessions in one shared Workspace. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the same member-based format can also live in `.agents/team.json`), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
 
 ## Commands
 
@@ -12,7 +12,7 @@ npm run typecheck                  # tsc --noEmit; run before every install/relo
 npm test                           # vitest unit tests
 npx vitest run tests/validate.test.ts            # one file
 npx vitest run -t "returns auto only"            # one test by name
-PASEO_E2E=1 npx vitest run tests/daemon.e2e.test.ts   # live daemon; starts real agents and costs tokens (PASEO_URL overrides ws://127.0.0.1:6767/ws)
+PASEO_RESEARCH_E2E=1 npx vitest run tests/research-live.e2e.test.ts   # opt-in live models; costs tokens, retain sessions for review
 
 paseo plugin install "$(pwd)"      # local install; then `paseo plugin ls` must show "running"
 paseo plugin reload paseo-agent-team
@@ -25,27 +25,21 @@ There is no build or lint step; Paseo bundles the TypeScript sources itself on i
 
 Paseo plugins have two runtimes, each with one entry that default-exports a `contribute` function:
 
-- `index.server.ts` + `server/` run in a daemon subprocess. `server/team.ts` holds every RPC handler; handlers get `{ paseo }` (the Paseo SDK) and do the filesystem and agent work.
-- `index.client.tsx` + `client/` run inside the Paseo app (React Native, all platforms). It registers a workspace panel (`TeamPanel`), an always-visible sidebar item and screen that lists every project's teams and creates new ones (`TeamScreen`), and a Command Center item.
-- `shared/` is compiled into both and must stay pure (Zod contracts and plain values, no Node or React Native APIs). It holds the team schema (`team.ts`), RPC contracts (`rpc.ts`), provider/model validation (`validate.ts`), the planner and orchestrator prompts (`proposal.ts`, `prompt.ts`), workspace matching (`apply-plan.ts`), planner cleanup (`cleanup.ts`) and UI strings (`messages.ts`, English, Korean, Japanese and Simplified Chinese). Most logic lives here so it can be unit-tested without a daemon.
+- `index.server.ts` registers only the current member/Profile team RPCs. `server/research-team.ts` manages member sessions, prompt injection and reset. `server/team-directory.ts` manages supported files, listing, reconnect, restore and deletion.
+- `index.client.tsx` registers `TeamPanel` (configuration), `AgentDashboard` (runtime graph and timeline), and `TeamScreen` (project teams and All agents). `client/ui.tsx` retains shared card, button and layout styles from the original UI. All projects use the same workflow; an unconfigured Workspace opens the member/Profile editor.
+- `shared/research-team.ts` and `shared/research-rpc.ts` hold the active schemas, member identity, prompt rendering and RPC contracts. Shared code must stay pure: no Node or React Native APIs. UI text lives in `shared/messages.ts` in English, Korean, Japanese and Simplified Chinese.
 
-The user-facing flow is propose → review → apply. Propose starts a planner agent with `outputSchema: TEAM_JSON_SCHEMA`. The client then polls `teamProposal`, which calls `waitForFinish(1000)` and parses the planner's last message. Apply re-validates, refuses workspaces another team of the project uses, writes the team's own file, reuses or creates the orchestrator's workspace matched by title, and then either tells a running orchestrator on the same provider/model to re-read the team or starts a new one. Finally it archives planner agents and an emptied `Team planner` workspace.
+The user-facing flow is configure Roles and local prompts → select member Profiles and Orchestrator → Apply → work through native conversations. Apply creates or reuses idle member sessions without sending tasks. Members proactively organize and send their own key findings or blockers. Orchestrator scheduling uses native Paseo messaging with `notifyOnFinish: false`, independently of Paseo parent/child lifecycle.
 
-```
-propose → planner agent → poll teamProposal → user edits draft → apply
-apply: validate → check other teams' workspaces → write the team's file → match/create the orchestrator's workspace → reuse or start orchestrator → archive planners
-```
+Key details:
 
-Role agents are not created by the plugin. The orchestrator starts them through Paseo tools or `paseo run`, following the instructions rendered by `orchestratorPrompt`. Behaviour for role agents can only be shaped through that prompt.
-
-Key details that span files:
-
-- A team belongs to the workspace in its `orchestrator.workspace`, matched by title (`shared/team-files.ts`). The panel of a workspace reads only that workspace's team, and the orchestrator prompt names only its own file.
-- Agents the plugin starts carry the label key `LABEL = "workspace-agents"` (`shared/cleanup.ts`) with value `planner` or `orchestrator`. Cleanup and orchestrator reuse depend on it, so do not rename it casually.
-- Agents get `modeId: "auto"` only when the provider's snapshot `modes` include `auto` (`autoModeOf`). Otherwise the provider's default mode applies.
-- `outputSchema` is not enforced by every provider, so `proposal.ts` also embeds an example of the exact shape in the prompt and parses defensively.
-- Workspace and agent lists are read as a single page; pagination is a known open follow-up in `.forge/followups.md`.
-- Daemon-side error strings are English only; client UI text goes through `client/i18n.ts` and `shared/messages.ts` (see the i18n rule below).
+- Current team definitions use `version: 2`, `workspace`, extensible `roles`, named `members`, `launchSnapshot` and `orchestratorMemberId`. Version 1 definitions are ignored and remain on disk. Do not add compatibility UI, automatic conversion or legacy planner flows. Original planner helper modules remain unregistered; they are outside the product workflow.
+- Match each team to its Workspace by title. Preserve unrelated files when allocating a new definition filename.
+- Stable labels `paseo-agent-team.team`, `paseo-agent-team.member` and `paseo-agent-team.config` identify sessions and prompt/config fingerprints. The Orchestrator also carries `workspace-agents=orchestrator`.
+- Preserve user-selected provider/model/mode/effort/features. Do not choose automatic modes or replace Profiles. Changed prompt/config fingerprints are pending until explicit per-member reset.
+- Host-local Profile bindings and session IDs live in `.agents/.runtime/paseo-agent-team/<teamId>.json`, excluded from git on Apply.
+- Team management follows pagination. The generic All agents view's single-page lists remain a known limitation.
+- Daemon errors are English. Client UI strings go through `client/i18n.ts` and `shared/messages.ts`.
 
 ## Plugin constraints that have bitten this repo
 

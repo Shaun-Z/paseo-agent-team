@@ -1,179 +1,58 @@
 ## Concept
 
-Agent team gives a Paseo project a team of agents. One orchestrator agent controls the team, and each role on the team is a separate agent that can use its own provider and model. A team might have a Claude role for gameplay code, a Codex role for design, an Antigravity (Gemini) role for sound and a Cursor role for tests.
+Paseo Agent Team organizes user-configured agents in one shared Workspace. A Role defines responsibilities and local prompt files. A member has a stable identity, a Role and launch parameters selected from a Paseo Agent Profile. Several members can perform the same Role on different providers or models.
 
-You describe a request once. The orchestrator splits it by role and delegates each part to the role that owns it, then reports back to you.
+The user selects one member as Orchestrator. It discusses direction with the user and wakes configured members through native Paseo messages. Members collaborate directly and proactively send organized key findings or blockers to the Orchestrator. Common prompts, Role prompts and coordination instructions supplement each member's harness instructions.
 
-- Each role has its own folders and instructions, so the orchestrator knows which part of the work belongs to whom.
-- The team definition is a file in the repository, `.agents/teams/<workspace>.json`, so it can be committed and shared through git.
-- A project can have several teams, but each team belongs to one workspace, and no two teams share a workspace.
+## Configure and work
 
-Request flow:
+Users create local prompt files, configure Roles and members, choose each member's Profile and select the Orchestrator. Apply writes the team definition and prepares independent idle sessions in the team's Workspace. It does not issue model tasks. The plugin preserves each Profile's provider, model, mode, effort and feature values.
 
-```
-request → orchestrator → roles (each with its own provider/model) → results back to orchestrator
-```
+Users start work in the Orchestrator's native conversation and can enter any member's conversation to give instructions. Members share Project files while maintaining separate conversations. The plugin does not summarize or forward ordinary conversation to the Orchestrator.
 
+There is one team workflow. Earlier version 1 definitions are ignored and remain on disk. Old planner, editor and configuration conversion flows are not exposed.
 
-## Research teams
+## Configuration and activity
 
-Version 2 teams separate extensible Role definitions, user-selected Agent Profile settings, named members and their live sessions. Users preconfigure the member list and select one member as Orchestrator. A Role can have multiple members on different providers or models. Common and Role prompts are loaded from local Project files when member sessions are created.
+The **Agent team** panel shows configuration. **Members** lists saved launch parameters, highlighting the Orchestrator. **Roles & prompts** lists common and Role prompt files and the team definition path. Direct edit actions open the selected member or Role. The editor separates General, Roles and Members, expands one item at a time and initially collapses launch parameter details. Apply and Cancel remain visible at the top.
 
-The team panel provides a Profile-based member editor and explicit per-member session reset. Apply creates or reuses independent idle sessions in one shared Workspace. It does not submit research tasks. The Orchestrator wakes members through Paseo's native agent communication; member instructions call for proactive, curated reports of significant findings and blockers. Ordinary discussion and raw runtime notifications are not forwarded by the plugin into the Orchestrator's conversation.
+The **Agent dashboard** panel shows activity for that Workspace's team. Overview contains member status, a directed relationship graph and up to five recent messages. Wide panels place the graph and messages side by side. Members with the same Role remain separate nodes. Nodes open native conversations; message counts open the corresponding exchange. Configured members without a session remain visible. Workspaces without a configured team show a configuration entry.
 
-The member graph shows every configured member, status, pending configuration and the latest observed request. It draws directed communication observed in current session timelines and opens native chats for direct user intervention. Archived session history is retained by Paseo and is not included in current-session message counts.
+Timeline combines current and archived sessions of configured members. It defaults to member messages, newest first; All activity adds user instructions, local replies, tools and events. Search stays visible while participant, activity and time filters expand on demand. Expanded records expose full text, tool details and native conversation links. Matching records are displayed 20 at a time. Timeline is a read-only user view and does not send history into the Orchestrator's conversation.
 
-The All agents tab lists research members' actual sessions with activity filters. Their configured waiting states are shown in the research member graph, while legacy waiting-role cards apply only to v1 teams.
+The two panels link to each other in the same Workspace. The sidebar's **Agent teams** screen retains compact project cards and team actions. **All agents** shows native session trees across projects with activity filters, density controls and closed-session controls.
 
-The team timeline below the graph merges current and archived sessions of configured members. It separates delivered member messages, user instructions, local replies, tools and events. Users can filter participants, activity, local date/time and text, expand records, and open related native conversations. Selecting an arrow count or message direction filters the exchange and highlights matching graph connections. Tool details start collapsed. The timeline only observes history and does not send it into the Orchestrator's conversation.
+## Team definitions and changes
 
-Profile launch settings are copied into the team's file. Host-local Profile bindings and agent IDs are kept in a git-excluded runtime directory. Changing the original Profile does not update existing sessions. A v1 team can be explicitly converted on Apply; its old agents are archived and Role instructions are preserved in local prompt files without replacing existing files. Removing a member and applying archives that member's session.
+A Project can have multiple teams, each owning one Workspace. A team definition lives in `.agents/teams/<workspace>.json`; the same format may be stored in `.agents/team.json`. Definitions use version 2, separate Roles from members and store Profile launch snapshots. Files are intended to be shared through git. Host-local Profile bindings and live session IDs are kept in `.agents/.runtime/paseo-agent-team/`, excluded through the Project's `.gitignore` on Apply.
 
-Shared-Workspace teams require the Project checkout. Tool injection must be available for each selected provider. The built-in Antigravity adapter does not expose Paseo tools; the separate `antigravity-cli` adapter supports opt-in sharing through ACP. Native communication has been verified with an Antigravity CLI coordinator and two Codex members using saved Profiles. Other provider combinations and restart recovery need live validation. Codex Auto-review may require a user-authorized task scope in a member's conversation before allowing a peer-requested tool call; the plugin does not grant that permission automatically.
+Reapplying reuses sessions by team and member identity. Prompt or launch-setting changes are marked pending. Explicit per-member reset archives that member's conversation and creates a fresh one, preserving other sessions. Removing a member and applying archives its session. Profile edits affect a member after the user reselects that Profile, applies and resets the changed member.
+
+Teams match Workspaces by the definition's `workspace` title. Reconnect attaches a saved team to an available Workspace after a rename. Restoring a team can recreate its missing Workspace. Deleting a team archives its labelled member sessions and removes the definition and local member directory. Archive failures preserve the definition for retry. Existing unrelated files and sessions are outside these operations.
 
 ## Requirements
 
-- Paseo 0.13.0 or newer, and at least one ready provider on the host.
-
-## Creating a team
-
-- Open the **Agent team** workspace panel, or run **Agent teams** from the Command Center.
-- The sidebar's **Agent teams** screen lists every project with its teams. From there you can open a team's panel in its orchestrator's workspace, start a new team for a project, and reconnect a team whose orchestrator workspace was renamed (see Changing a team). The **All agents** tab next to **Teams** shows the dashboard controls once at the top, then filter chips **All N**, **Working N**, **Awaiting N** and **Idle N**. A chip shows only the agent trees (an orchestrator or solo agent with everything under it) that contain at least one agent in that state, whole, and hides project sections with no matching tree. The numbers count trees, so a tree with agents in several states counts under each of them. Awaiting covers agents waiting on a permission prompt or stopped on an error. Each project's agents are a dashboard tree under its title bar. Pressing a card opens that agent. These settings are not saved when you leave the screen.
-- Describe your goal to have a planner propose roles, or start with an empty team.
-- Review the proposal, then press **Apply**.
-
-### Reviewing a proposal
-
-- Review the names, models, folders and instructions of every role before you press **Apply**. Every role runs in the orchestrator's workspace.
-- A blank role is named `role`. If that name is already in use, it gets a `#` and four random uppercase hex characters, such as `role#4F2A`.
-- **Edit team with AI**: type a request under the role list. A request that names a role, or whose work fits one, changes that role; a new role is added only when asked for or when no role fits. A planner proposes the revised team, which is applied to the draft at once with a notice of what changed. **Undo** and **Redo** step through AI edits. Nothing is written to the team file until you press **Apply**.
-- **Edit instructions** opens a dialog with the full instructions. **Improve with AI** asks an instructions planner to propose a rewrite, which you can apply or discard. **Save** only updates the draft; the team's file is written by **Apply**.
-- A proposal survives leaving the screen. When you reopen it, the plugin picks up the newest planner for that workspace or project, whether it is still running or ready to review.
-- Proposing again, or cancelling the review, archives the earlier planner.
-
-### Applying
-
-Apply does four things in order:
-
-1. Writes the team to its own file. A new team goes to `.agents/teams/<orchestrator workspace>.json` in the registered project root. A team that already has a file keeps it, including the older `.agents/team.json`.
-2. Reuses a project workspace whose title matches the orchestrator's workspace, or creates it.
-3. Starts an orchestrator. If the team's orchestrator is already running on the same provider and model, it is told to re-read the team instead, so no second orchestrator starts. Apply also refuses a team that uses a workspace another team of the project already uses.
-4. Archives the project's plugin-labelled planner agents and any unused, otherwise empty `Team planner` workspace. If cleanup fails, the team is still applied and the failure is shown as a warning.
-
-Apply may also write the allow rules described under Agent modes and permissions. After Apply you are taken to the orchestrator's workspace.
-
-## Working with the orchestrator
-
-Press **Open orchestrator** after applying, or find the agent titled **Orchestrator** in the orchestrator's workspace. Talk to it in plain language, for example: "Redesign the title screen and add jump and coin sounds. Report back when both are done."
-
-- The orchestrator splits the request by role and starts each role's agent in the orchestrator's workspace, with that role's provider and model. It uses `paseo run`, or Paseo's `create_agent` tool for a role that uses the Auto Accept feature.
-- Before starting a role, it looks for an existing agent of that role, found by its `role=<name>` label, and continues that agent instead of starting a new one.
-- Each agent it starts is titled `<role>#<id>` (for example `ui#ADB2`) and labelled `role=<role>`, so several agents of one role can be told apart.
-- It waits for the results and summarizes what each role did.
-- Role agents appear in the orchestrator's workspace in Paseo's sidebar, where you can watch them or message them directly.
-
-```
-Your request → Orchestrator splits it by role → each role's agent works in the orchestrator's workspace → Orchestrator waits and reports
-```
-
-## Several teams per project
-
-- A project can run several teams, one per workspace. A team belongs to the workspace its orchestrator runs in, and the **Agent team** panel of that workspace shows that team.
-- Each team has its own file in `.agents/teams/`, and each team's orchestrator reads only its own file, so teams do not change each other.
-- To create another team, open the **Agent team** panel in a workspace that has no team yet and create one as usual.
-
-```
-Workspace A panel → team A (.agents/teams/a.json) → orchestrator in A
-Workspace B panel → team B (.agents/teams/b.json) → orchestrator in B
-```
-
-## Changing a team
-
-- Open the **Agent team** panel in the team's orchestrator workspace and press **Edit**. Change the team and press **Apply**.
-- Or edit the team's file directly and press **Apply again** in the panel. The panel shows the file's path, the current team, and flags any provider or model the host cannot run.
-- **Reset session**: to reset the orchestrator session with the same team, press **Reset session** next to **Apply again**. Use it instead of `/clear`. Sending `/clear` in the orchestrator's chat makes Paseo archive that agent and start a new one with no labels and no instructions, so the plugin no longer treats it as the team's orchestrator. **Reset session** asks for confirmation, then archives the labelled orchestrator and starts a new one with the same team, provider, model, mode and instructions, read from the team file. Role sessions are kept. Close the agent that `/clear` created yourself.
-- **Reconnect**: if you rename the orchestrator's workspace in Paseo, the team shows as "workspace not found" on the **Agent teams** screen. Press **Reconnect** on its row and pick the renamed workspace. That rewrites `orchestrator.workspace` in the team's file (and in an old `.agents/team.json` for the same workspace) to the new title. The file name and agents are not changed, and Reconnect refuses a workspace another team uses. If the orchestrator's workspace is gone rather than renamed, the Reconnect panel also offers **Start in a new workspace**, which runs the team like **Apply** with its saved file, creating the workspace named in the file if needed and starting the orchestrator there. The panel lists only the project's workspaces that no other team uses, since one workspace runs one team. When none is free, the panel says so and offers only that button and Cancel.
-
-## Deleting a team
-
-- Press **Delete** on the team's row in the **Agent teams** screen and confirm.
-- The delete archives the team's orchestrator, the role sessions labelled with its roles in its workspace (role names match case-insensitively), and any planner still proposing for its workspace, so a pending proposal does not come back.
-- Agents in a workspace another team uses are left alone.
-- No workspace is archived. Paseo workspaces carry no labels, so the plugin cannot tell a workspace it created from one you made. Empty workspaces stay for you to archive.
-- Files are removed only after every agent is archived. Then the team's file and any old `.agents/team.json` for the same orchestrator workspace are deleted.
-- If an agent cannot be archived, no file is deleted, and you can retry from the same row. If a file cannot be deleted, a separate message says so.
-- A file committed to git shows up as a deletion to commit.
-
-## Watching agents
-
-The **Agent dashboard** panel (**에이전트 대시보드** in Korean) opens as a workspace tab or in the right sidebar next to Files and Changes. It shows the project's agents as a tree.
-
-Use the **Density** toggle in the dashboard header, next to **Show closed**, to choose one of three levels. **Normal** is the default.
-
-- **Brief**: a one-line pill with the provider logo, the role or title, a short model name and the status.
-- **Normal**: a two-line card, 150px wide (140px in a narrow panel), with the logo, title and status, then `model · mode`.
-- **Detailed**: the full card with caption, model, effort and mode chips, described below.
-
-The choice is remembered per tab, like **Show closed**. Glow, arrival flash, signal dots and dashes are scaled to each level's node size.
-
-- An agent started by another agent appears under that agent. Role agents started by the orchestrator sit under it.
-- Agents with no parent are roots and stay shown unless they are closed or archived. Roots without children are listed under **Solo agents**.
-- Roles of the team that have not been started yet appear under the newest orchestrator of the team's workspace as dimmed **Waiting** cards on a dashed line. A waiting card is replaced by the real card once an agent labelled with that role shows up in the team's workspace.
-- Provider sub-agents, such as those Claude Code starts with its Agent tool, appear as lighter **Sub-agent** cards (**하위 에이전트** in Korean) under the Paseo agent that spawned them, labelled with their sub-agent type. They cannot be opened, since they are not Paseo agents. In **Brief** density they are collapsed into a **+N** badge under their parent, which expands on press. With **Show closed** off, a role agent or sub-agent is shown only while it is running or has the **?** or **!** badge, when one of its descendants is, or when it is the newest finished one of its type (role, or sub-agent type) under the same parent. Older finished ones, and the agents under them, are hidden. An agent whose parent is not shown becomes a root and follows the same rule. With **Show closed** on, every agent is shown.
-- In **Detailed** density, each card shows the provider logo, the role or caption, the title, and the model, effort (thinking option) and permission mode chips. When an agent has no effort set, its effort chip shows the model's default effort from the provider, dimmed.
-- Badges: a circled **?** means the agent is waiting for your answer to a permission prompt or question, and **!** means it has stopped on an error. An amber pulsing dot means it is running. ✓ means it has finished.
-- Lines to running agents turn into animated red dashes with moving signal dots. An agent that is not running itself but has a running agent below it, such as an orchestrator waiting on its role agents, gets an amber border without the glow.
-- Press a card to open that agent. Closed and archived agents are hidden unless **Show closed** is on.
-- With **Show closed** on, a closed or archived agent card, or a finished sub-agent card, shows a small × that hides it, together with the agents under it, from that dashboard tab. Running cards, cards that need attention (**?** or **!**), and cards with a running agent under them have no ×. The header then shows **Restore hidden (N)**, which brings them all back. When there are closed agents to hide, the header also shows **Hide closed (N)** at the right, which hides every card that has a × at once. Hiding does not delete or archive anything in Paseo, and the hidden list is kept per dashboard tab, like **Show closed**. A Paseo agent whose session stopped on an error, such as a provider reporting insufficient funds, also shows a small **Archive** button. Pressing it archives that agent, so its tab closes and its card leaves the dashboard; it shows again only with **Show closed**. Cards waiting on a permission prompt, running cards, cards with a running agent under them, and provider sub-agents have no **Archive** button.
-
-The dashboard can also sit in the right sidebar while you work in the center of the window.
-
-## Agent modes and permissions
-
-Planner, orchestrator and role agents start in the provider's reviewed auto mode when it has one. The order is:
-
-1. Codex's **Auto-review** (`auto-review`).
-2. Otherwise an `auto` mode, such as Claude's **Auto** mode (`auto`).
-3. Otherwise any other mode whose id or label has a word starting with `auto`, such as `auto_edit` or `Auto accept`.
-4. Only a provider with none of these uses its unattended mode: the one marked unattended, otherwise the one Paseo marks dangerous, such as Antigravity's **Full access**.
-5. Otherwise, a provider with none of these modes but an Auto Accept feature, such as Cursor, starts agents with that feature on. It approves every permission prompt without a reviewer.
-6. Otherwise agents use the default mode.
-
-- Auto mode and Auto-review send permission requests to an automatic reviewer. The unattended mode keeps running without asking you.
-- Auto Accept is not a reviewed mode. Cursor offers `auto_accept` as a feature toggle rather than a mode, and the plugin turns it on only when the provider has no auto, unattended or dangerous mode. If the plugin cannot read a provider's features, the agent starts in the provider's default mode.
-- The planner is told not to change files, but it is not technically prevented from doing so.
-
-**Allow rules in `.claude/settings.local.json`.** Some Claude setups need an allow rule so that Claude's Auto-mode reviewer does not block the orchestrator's starts:
-
-- When a Claude orchestrator has a role whose chosen mode is unattended, such as Antigravity's `full-access`, Apply adds `Bash(paseo run *)` to the project's `.claude/settings.local.json`. Auto mode honours that rule without asking its reviewer.
-- When a role uses the Auto Accept feature, Apply (and Reset session) adds `mcp__paseo__create_agent` to the same file, so the orchestrator can start that role with Paseo's `create_agent` tool without review.
-- Remove the rules to undo them. Check that you don't commit the file: Claude Code ignores it in git only when Claude Code itself created it.
-
-## Data and privacy
-
-- The plugin reads project, workspace, agent and provider metadata, and the team files. It may write the project's `.claude/settings.local.json`.
-- Planning sends your goal to the selected provider, preferring Claude when it is ready. For one added role, it sends your description, the existing role names and folders, and the available model IDs. The planner is instructed to inspect the repository.
-- Orchestrator and role agents send their instructions, prompts, and any repository content or tool results they read to their configured providers, under those providers' normal behavior.
-- These agents consume provider usage.
-- The plugin has no separate external service and no software download.
+- Paseo 0.13.0 or later with plugins enabled.
+- User-configured Agent Profiles and ready providers.
+- Native Paseo tools available in each selected harness.
+- One shared Workspace in the Project checkout.
 
 ## Language
 
-English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-side error messages are in English.
+English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-side errors are English.
+
+## Data and privacy
+
+The plugin reads Project, Workspace, provider, Profile and agent metadata; local prompt files; and member conversation histories. It writes team definitions and a local member directory. Member prompts and task content are processed by the selected model providers under their normal behavior. Model turns consume provider usage. The plugin runs no separate external service.
 
 ## Limitations
 
-- **Research history.** Ordering uses Paseo timestamps, which some providers reconstruct when restoring history. Equal timestamps do not establish cross-session order. Members removed from the team definition are omitted; their sessions remain in Paseo's archives. Long histories are backfilled on opening and rendered 100 records at a time. Navigation opens conversations rather than specific messages.
-- **Shared checkout.** All roles run in the orchestrator's workspace and share one project checkout. Folder assignments guide agents but do not enforce filesystem isolation. Avoid overlapping work, or ask the orchestrator to sequence it.
-- **Model scope.** A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in the team's workspace from Paseo's own UI still use whatever model you pick there.
-- **Workspace matching.** A team is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team until the two match again. Paseo has no rename event, so after renaming in Paseo, press **Reconnect** on the team's row, or edit `orchestrator.workspace` in the file.
-- **Older team files.** A team file written by an older version may still list a workspace for a role. Roles still run in the orchestrator's workspace, but until the next Apply rewrites the file, those workspaces stay reserved for the team, and deleting the team also archives its role agents there. Apply removes them from the file. Workspaces created for roles by older versions are not archived, so archive them yourself.
-- **Auto mode reviewer.** An orchestrator in Claude's Auto mode has its tool calls checked by Claude's automatic reviewer, which can deny starting an agent in an unattended mode such as Antigravity's `full-access`, the only mode Antigravity has. The orchestrator is told to use each role's mode as given, never to swap in another mode or provider, and to report a denied start to you. An orchestrator that was already running may need a restart to pick up an allow rule.
-- **Auto Accept starts.** A role that uses the Auto Accept feature is started with Paseo's `create_agent` tool, because `paseo run` cannot set features. The orchestrator needs that MCP tool. If it cannot use the tool or the start is denied, it reports the role, provider, mode and features as blocked and does not fall back to `paseo run`.
-- **Agent titles.** The `<role>#<id>` title is an instruction in the orchestrator's prompt, not something the plugin enforces, so an agent may be titled differently. An orchestrator keeps the instructions it started with until its session is reset with **Reset session**.
-- **Sidebar order.** Paseo's sidebar puts a workspace it has not seen yet at the top of its project, so a workspace that Apply creates appears there. A workspace you already have keeps its place. The plugin cannot set the sidebar order.
-- **Legacy dashboard lists.** The legacy agent dashboard reads one page of workspace and agent lists and can miss agents on large hosts. Server-side team matching, member management and deletion follow pagination.
-- **Client navigation.** On Paseo hosts without client navigation, the agent dashboard cards cannot be pressed.
-- **Sub-agent discovery.** Sub-agents started before the dashboard opened are found in the last 200 timeline items of each unarchived agent in the project. Opening the dashboard reads one such page per agent, so a project with many agents makes many requests.
-- **Sub-agent status.** A sub-agent found in that window takes its status from the timeline. It can read as finished while a background sub-agent is still running, until its next activity arrives.
-- **Narrow sidebar.** In the narrow right sidebar, when the panel is too narrow for the whole tree, the orchestrator card shrinks to its provider icon and model name. If the tree still does not fit, it scrolls horizontally with the scrollbar at the bottom of the panel, so role cards may be off-screen until you scroll.
+- Reporting and collaboration rules are prompt instructions. Provider behavior determines tool availability, interruptions and user steering.
+- The built-in Antigravity adapter cannot inject Paseo tools. The separate `antigravity-cli` adapter supports opt-in tool sharing through ACP. Pi depends on its installed integration.
+- Native communication has been verified with an Antigravity CLI coordinator and two Codex members using saved Profiles. Other provider combinations, active interruption and restart recovery need live validation.
+- Approval reviewers may require a user-authorized task scope in a member's conversation. The plugin does not grant that authorization or substitute permission settings.
+- Shared files require coordination for overlapping edits. Role prompts do not enforce filesystem isolation.
+- Timeline ordering depends on Paseo timestamps, which some providers reconstruct. Equal times do not establish cross-session ordering. Graph counts cover current sessions and exclude callbacks. Removed members' history remains accessible in Paseo archives.
+- Long histories are backfilled on opening and displayed 20 matching records at a time. Navigation opens conversations rather than individual messages.
+- The generic All agents view reads one page of Workspace and agent lists. Team management follows pagination. Historical sub-agent discovery reads the latest 200 timeline items per unarchived agent and may show stale status until new activity arrives.
+- Native conversation links require client navigation. Paseo controls sidebar ordering.

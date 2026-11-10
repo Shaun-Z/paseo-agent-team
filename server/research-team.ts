@@ -6,11 +6,10 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { z } from "zod";
 import { workspaceLabel } from "../shared/apply-plan";
 import { LABEL } from "../shared/cleanup";
-import { AgentProfileSchema, canonical, CONFIG_LABEL, legacyView, MEMBER_LABEL, memberPrompt, ResearchTeamSchema, researchFromLegacy, runtimeFile, TEAM_LABEL, validateResearch, type ResearchTeam } from "../shared/research-team";
+import { AgentProfileSchema, canonical, CONFIG_LABEL, MEMBER_LABEL, memberPrompt, ResearchTeamSchema, runtimeFile, TEAM_LABEL, validateResearch, type ResearchTeam } from "../shared/research-team";
 import type { researchApplyRpc, researchReadRpc, researchResetRpc } from "../shared/research-rpc";
-import { teamFileFor } from "../shared/team-files";
 import { catalogFrom } from "../shared/validate";
-import { projectOf, projectTeams } from "./team";
+import { projectOf, projectTeams, teamFileFor } from "./team-directory";
 import { allPages } from "./pagination";
 
 type Api = PluginHandlerContext["paseo"];
@@ -69,7 +68,7 @@ async function context(target: Target, paseo: Api) {
   const workspace = "workspaceId" in target ? workspaces.find(entry => entry.id === target.workspaceId && entry.projectId === project.id && !entry.archivingAt) : undefined;
   if ("workspaceId" in target && !workspace) throw new Error("Workspace is not active in this project");
   const listing = await projectTeams(project);
-  const own = workspace ? listing.teams.find(entry => entry.team.orchestrator.workspace.trim().toLowerCase() === workspaceLabel(workspace).toLowerCase()) : undefined;
+  const own = workspace ? listing.teams.find(entry => entry.team.workspace.trim().toLowerCase() === workspaceLabel(workspace).toLowerCase()) : undefined;
   return { project, workspaces, workspace, listing, own };
 }
 export async function readResearch(target: RpcInput<typeof researchReadRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof researchReadRpc>> {
@@ -83,7 +82,7 @@ export async function readResearch(target: RpcInput<typeof researchReadRpc>, { p
       if (parsed.success) profiles.push(parsed.data);
     }
   } catch (error) { errors.push(`Could not read Agent Profiles: ${String(error)}`); }
-  const team = own?.research ?? null;
+  const team = own?.team ?? null;
   const bindings: Record<string, string> = {};
   const identities: Record<string, string> = {};
   const members: RpcOutput<typeof researchReadRpc>["members"] = [];
@@ -101,31 +100,20 @@ export async function readResearch(target: RpcInput<typeof researchReadRpc>, { p
         error: agents.length > 1 ? "Multiple active sessions for this member; resolve them before applying." : null });
     }
   }
-  return { project, workspace: workspace ? workspaceLabel(workspace) : null, file: own?.file ?? null, team, legacy: !!own && !own.research, legacyTeam: own && !own.research ? own.team : null, profiles, bindings, identities, members, errors };
+  return { project, workspace: workspace ? workspaceLabel(workspace) : null, file: own?.file ?? null, team, profiles, bindings, identities, members, errors };
 }
-async function apply(rootTarget: Target, team: ResearchTeam, bindings: Record<string, string>, paseo: Api, resetId?: string, migrateLegacy = false) {
+async function apply(rootTarget: Target, team: ResearchTeam, bindings: Record<string, string>, paseo: Api, resetId?: string) {
   const { project, workspaces, workspace, listing } = await context(rootTarget, paseo);
   if (listing.errors.length) throw new Error(listing.errors.join("\n"));
   if (workspace && workspaceLabel(workspace).toLowerCase() !== team.workspace.toLowerCase()) throw new Error("Team workspace must match the current workspace");
-  const sameWorkspace = listing.teams.find(entry => entry.team.orchestrator.workspace.toLowerCase() === team.workspace.toLowerCase());
-  if (sameWorkspace && (sameWorkspace.research ? sameWorkspace.research.id !== team.id : !migrateLegacy)) throw new Error("Workspace belongs to another team; use a free workspace for a new research team");
-  if (listing.teams.some(entry => entry.research?.id === team.id && entry.team.orchestrator.workspace.toLowerCase() !== team.workspace.toLowerCase())) throw new Error("Team ID already belongs to another workspace");
+  const sameWorkspace = listing.teams.find(entry => entry.team.workspace.toLowerCase() === team.workspace.toLowerCase());
+  if (sameWorkspace && (sameWorkspace.team.id !== team.id)) throw new Error("Workspace belongs to another team; use a free workspace for a new research team");
+  if (listing.teams.some(entry => entry.team.id === team.id && entry.team.workspace.toLowerCase() !== team.workspace.toLowerCase())) throw new Error("Team ID already belongs to another workspace");
   const catalog = catalogFrom((await paseo.providers.snapshot()).entries);
   const problems = validateResearch(team, catalog);
   if (problems.length) throw new Error(problems.join("\n"));
   const entries = await allAgents(paseo);
-  const file = sameWorkspace?.file ?? teamFileFor(legacyView(team), listing.teams, listing.names);
-  if (migrateLegacy && sameWorkspace && !sameWorkspace.research) {
-    const migration = researchFromLegacy(sameWorkspace.team);
-    const base = join(project.root, "prompts");
-    await mkdir(base, { recursive: true });
-    if (relative(await realpath(project.root), await realpath(base)).startsWith("..")) throw new Error("Prompt directory is outside the project");
-    const dir = join(base, "research-team");
-    await mkdir(dir, { recursive: true });
-    if (relative(await realpath(project.root), await realpath(dir)).startsWith("..")) throw new Error("Prompt directory is outside the project");
-    const seeds = [[migration.commonPromptFiles[0]!, "Coordinate shared files and keep research state in the Project.\n"], [migration.roles[0]!.promptFiles[0]!, "Guide the research and discuss direction with the user.\n"], ...sameWorkspace.team.roles.map((role, index) => [migration.roles[index + 1]!.promptFiles[0]!, role.instructions || `Role: ${role.name}\n`])];
-    for (const [path, text] of seeds) await writeFile(join(project.root, path!), text!, { flag: "wx" }).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
-  }
+  const file = sameWorkspace?.file ?? teamFileFor(team, listing.teams, listing.names);
   const prompts = await compiled(project.root, team, file);
   let leadWorkspace = workspace ?? workspaces.find(entry => entry.projectId === project.id && !entry.archivingAt && workspaceLabel(entry).toLowerCase() === team.workspace.toLowerCase());
   if (leadWorkspace) {
@@ -144,10 +132,6 @@ async function apply(rootTarget: Target, team: ResearchTeam, bindings: Record<st
   try { const saved = await runtime(project.root, team.id); if (saved?.workspaceId === workspaceId) previous = saved; }
   catch (error) { if (!(error instanceof SyntaxError) && !(error instanceof z.ZodError)) throw error; }
   const directory = { workspaceId, bindings: Object.fromEntries(team.members.filter(member => bindings[member.id] ?? previous?.bindings[member.id]).map(member => [member.id, bindings[member.id] ?? previous!.bindings[member.id]!])), members: team.members.flatMap(member => { const agent = candidates(entries, workspaceId, team.id, member.id)[0]; return agent ? [{ id: member.id, agentId: agent.id, fingerprint: agent.labels[CONFIG_LABEL] ?? "" }] : []; }) };
-  if (migrateLegacy && sameWorkspace && !sameWorkspace.research) {
-    const roleNames = new Set(sameWorkspace.team.roles.map(role => role.name));
-    for (const { agent } of entries) if (!agent.archivedAt && agent.workspaceId === workspaceId && (agent.labels[LABEL] === "orchestrator" || roleNames.has(agent.labels.role ?? ""))) await paseo.agents.ref(agent.id).archive();
-  }
   await ignoreRuntime(project.root);
   await atomic(join(project.root, file), JSON.stringify(team, null, 2) + "\n");
   await atomic(join(project.root, runtimeFile(team.id)), JSON.stringify(directory, null, 2) + "\n");
@@ -174,18 +158,18 @@ async function apply(rootTarget: Target, team: ResearchTeam, bindings: Record<st
   const coordinator = directory.members.find(member => member.id === team.orchestratorMemberId)!;
   return { workspaceId, orchestratorAgentId: coordinator.agentId, file: join(project.root, file) };
 }
-export async function applyResearch({ team: input, bindings, migrateLegacy, ...target }: RpcInput<typeof researchApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof researchApplyRpc>> {
+export async function applyResearch({ team: input, bindings, ...target }: RpcInput<typeof researchApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof researchApplyRpc>> {
   const team = ResearchTeamSchema.parse(input);
   const project = await projectOf(paseo, target);
-  return exclusive(project.root, () => apply(target, team, bindings, paseo, undefined, migrateLegacy));
+  return exclusive(project.root, () => apply(target, team, bindings, paseo));
 }
 export async function resetResearchMember({ workspaceId, memberId }: RpcInput<typeof researchResetRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof researchResetRpc>> {
   const project = await projectOf(paseo, { workspaceId });
   return exclusive(project.root, async () => {
     const { own } = await context({ workspaceId }, paseo);
-    if (!own?.research?.members.some(member => member.id === memberId)) throw new Error("Unknown team member");
-    await apply({ workspaceId }, own.research, {}, paseo, memberId);
-    const directory = await runtime(project.root, own.research.id);
+    if (!own?.team.members.some(member => member.id === memberId)) throw new Error("Unknown team member");
+    await apply({ workspaceId }, own.team, {}, paseo, memberId);
+    const directory = await runtime(project.root, own.team.id);
     return { agentId: directory!.members.find(member => member.id === memberId)!.agentId };
   });
 }

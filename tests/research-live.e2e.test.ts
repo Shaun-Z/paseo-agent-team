@@ -59,7 +59,7 @@ describe.skipIf(process.env.PASEO_RESEARCH_E2E !== "1")("research team with save
     workspaceId = workspace.id;
     report.workspaceId = workspaceId;
     report.root = root;
-    const applied = researchApplyRpc.output.parse(await wire.invokePluginRpc("paseo-agent-team", researchApplyRpc.name, { workspaceId, team, bindings: Object.fromEntries(selected.map(({ role, profile }) => [label(role), profile.id])), migrateLegacy: false }));
+    const applied = researchApplyRpc.output.parse(await wire.invokePluginRpc("paseo-agent-team", researchApplyRpc.name, { workspaceId, team, bindings: Object.fromEntries(selected.map(({ role, profile }) => [label(role), profile.id])) }));
     report.applied = applied;
     console.log(`Live test Workspace: ${workspaceId}; report: ${join(root, "smoke-report.json")}`);
   }, 90_000);
@@ -108,7 +108,7 @@ describe.skipIf(process.env.PASEO_RESEARCH_E2E !== "1")("research team with save
       expect(snapshot?.agent.currentModeId).toBe(launch.modeId);
       expect(snapshot?.agent.thinkingOptionId).toBe(launch.thinkingOptionId);
     }
-    const reapplied = researchApplyRpc.output.parse(await wire.invokePluginRpc("paseo-agent-team", researchApplyRpc.name, { workspaceId, team, bindings: {}, migrateLegacy: false }));
+    const reapplied = researchApplyRpc.output.parse(await wire.invokePluginRpc("paseo-agent-team", researchApplyRpc.name, { workspaceId, team, bindings: {} }));
     expect(reapplied.orchestratorAgentId).toBe(members.get(label("anchor")));
     expect((await read()).members.map(member => member.agentId)).toEqual(initial.members.map(member => member.agentId));
     (report.checks as Record<string, unknown>).reuse = true;

@@ -1,13 +1,13 @@
 /** Layout is keyed by member identity, independent of role multiplicity and session IDs. */
 export function memberGraph(ids: readonly string[], coordinatorId: string) {
-  const width = 260, height = 190, gap = 110, margin = 24;
+  const width = 224, height = 124, gap = 80, margin = 16, rowGap = 64;
   const peers = ids.filter(id => id !== coordinatorId);
   const columns = Math.max(1, Math.min(3, peers.length));
   const canvasWidth = columns * width + Math.max(0, columns - 1) * gap + margin * 2;
   const nodes = new Map<string, { x: number; y: number; width: number; height: number }>();
   nodes.set(coordinatorId, { x: (canvasWidth - width) / 2, y: margin, width, height });
-  peers.forEach((id, index) => nodes.set(id, { x: margin + (index % columns) * (width + gap), y: margin + height + 100 + Math.floor(index / columns) * (height + 100), width, height }));
-  return { nodes, width: canvasWidth, height: peers.length ? margin * 2 + (Math.ceil(peers.length / columns) + 1) * (height + 100) - 100 : height + margin * 2 };
+  peers.forEach((id, index) => nodes.set(id, { x: margin + (index % columns) * (width + gap), y: margin + height + rowGap + Math.floor(index / columns) * (height + rowGap), width, height }));
+  return { nodes, width: canvasWidth, height: peers.length ? margin * 2 + (Math.ceil(peers.length / columns) + 1) * (height + rowGap) - rowGap : height + margin * 2 };
 }
 export function graphLine(from: { x: number; y: number; width: number; height: number }, to: { x: number; y: number; width: number; height: number }) {
   const dx = to.x + to.width / 2 - from.x - from.width / 2;

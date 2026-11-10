@@ -1,7 +1,7 @@
 import { ResearchGraph } from "./ResearchTeam";
 import { researchReadRpc } from "../shared/research-rpc";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useTabState, useTranslation } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -24,7 +24,6 @@ import {
   type DashboardDensityLayout,
 } from "../shared/dashboard-density";
 import { providerIcon } from "../shared/provider-icons";
-import { teamRosterRpc } from "../shared/rpc";
 import {
   applySubagentUpdate,
   mergeSubagents,
@@ -1175,11 +1174,20 @@ function AnimationAnchor({ value }: { value: Animated.Value }) {
   );
 }
 
-export function AgentDashboard(props: PluginWorkspacePanelProps) {
+export function AgentDashboard(props: PluginWorkspacePanelProps & { openConfiguration?(): void }) {
+  const { t } = useTranslation(messages);
   const read = useRpc(researchReadRpc);
   const query = useQuery({ queryKey: ["research", { workspaceId: props.workspaceId }], queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000 });
-  if (query.data?.team) return <ScrollView><ResearchGraph {...props} data={query.data} /></ScrollView>;
-  return <LegacyAgentDashboard {...props} />;
+  if (query.data?.team) return <ResearchGraph {...props} data={query.data} />;
+  const c = props.theme.colors;
+  return <View style={{ flex: 1, padding: props.layout.compact ? 16 : 24, gap: 12, backgroundColor: c.surface0 }}>
+    <Text style={{ color: c.foreground, fontSize: 18, fontWeight: "700" }}>{t("research.ui.activity")}</Text>
+    {query.isLoading ? <Text style={{ color: c.foregroundMuted }}>{t("loading")}</Text> : query.error ? <Text style={{ color: c.statusDanger }}>{String(query.error)}</Text> : <>
+      {query.data?.errors.map(error => <Text key={error} style={{ color: c.statusDanger }}>{error}</Text>)}
+      <Text style={{ color: c.foregroundMuted }}>{t("research.noTeam")}</Text>
+      {props.openConfiguration && <Pressable accessibilityRole="button" onPress={props.openConfiguration} style={{ alignSelf: "flex-start", padding: 8, borderWidth: 1, borderColor: c.border, borderRadius: 6 }}><Text style={{ color: c.accent }}>{t("research.create")}</Text></Pressable>}
+    </>}
+  </View>;
 }
 /** Shared dashboard data: queries, subscriptions, animations and the archive mutation. Use once per screen or panel. */
 export function useDashboardData(showClosed: boolean) {
@@ -1467,7 +1475,6 @@ export function ClosedControls({ colors, state, setState, closedIds, pad }: { co
 export function AgentDashboardView(props: {
   data: DashboardData;
   workspaceIds: string[];
-  rosterWorkspaceId: string | null;
   state: DashboardState;
   setState: (next: DashboardState) => void;
   colors: Colors;
@@ -1483,12 +1490,6 @@ export function AgentDashboardView(props: {
   const { data, workspaceIds, state, setState, colors } = props;
   const { paseo, agents, workspaces, archived, live, flow, glow, packet, defaultEfforts, icons } = data;
   const { t } = useTranslation(messages);
-  const readRoster = useRpc(teamRosterRpc);
-  const roster = useQuery({
-    queryKey: ["dashboard", "roster", props.rosterWorkspaceId],
-    queryFn: () => readRoster({ workspaceId: props.rosterWorkspaceId! }),
-    enabled: props.rosterWorkspaceId !== null,
-  });
   const unarchivedIds = useMemo(() => {
     const scope = new Set(workspaceIds);
     return (agents.data?.entries ?? [])
@@ -1519,7 +1520,7 @@ export function AgentDashboardView(props: {
     return buildAgentForest(
       [...parentAgents, ...subagentAgents(merged, parentAgents)],
       workspaceIds,
-      { ...state, defaultEfforts, roster: roster.data?.teams },
+      { ...state, defaultEfforts },
     );
   }, [
     agents.data,
@@ -1528,7 +1529,6 @@ export function AgentDashboardView(props: {
     workspaceIds,
     state,
     defaultEfforts,
-    roster.data,
   ]);
   const { reportForest, activityFilter = "all" } = props;
   useEffect(() => {
@@ -1698,72 +1698,5 @@ export function AgentDashboardView(props: {
         )}
       </ScrollView>
     </>
-  );
-}
-
-function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
-  const { t } = useTranslation(messages);
-  const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
-  const data = useDashboardData(state.showClosed);
-  const colors = props.theme.colors;
-  const pad = props.layout.compact ? 16 : 24;
-  const workspaceIds = useMemo(() => {
-    const entries = data.workspaces.data?.entries ?? [];
-    const projectId = entries.find(
-      (w) => w.id === props.workspaceId,
-    )?.projectId;
-    return projectId
-      ? entries.filter((w) => w.projectId === projectId).map((w) => w.id)
-      : [];
-  }, [data.workspaces.data, props.workspaceId]);
-  const [closedIds, setClosedIds] = useState<string[]>([]);
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
-      <View
-        style={{
-          paddingHorizontal: props.layout.compact ? 16 : 24,
-          paddingVertical: 16,
-          borderBottomWidth: 1,
-          borderColor: colors.border,
-          flexDirection: "row",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <Text
-          style={{ color: colors.foreground, fontSize: 18, fontWeight: "700" }}
-        >
-          {t("dashboardTitle")}
-        </Text>
-        <View
-          style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            flexShrink: 1,
-            marginLeft: "auto",
-            maxWidth: "100%",
-            gap: 12,
-          }}
-        >
-          <DensityToggle colors={colors} state={state} setState={setState} />
-        </View>
-      </View>
-      <ClosedControls colors={colors} state={state} setState={setState} closedIds={closedIds} pad={pad} />
-      <AgentDashboardView
-        data={data}
-        workspaceIds={workspaceIds}
-        rosterWorkspaceId={props.workspaceId}
-        state={state}
-        setState={setState}
-        colors={colors}
-        compact={props.layout.compact}
-        open={props.navigation ? (id: string) => props.navigation?.openAgent({ agentId: id }) : undefined}
-        reportClosed={setClosedIds}
-      />
-    </View>
   );
 }

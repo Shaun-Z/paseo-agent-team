@@ -4,10 +4,10 @@ import { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyResearch, readPrompt, readResearch, resetResearchMember } from "../server/research-team";
-import { projectTeams, applyTeam, reconnectTeam, restoreTeam, deleteTeam, teamRoster } from "../server/team";
+import { projectTeams, projectTeamsList, reconnectTeam, restoreTeam, deleteTeam } from "../server/team-directory";
 import { buildAgentForest, filterForest } from "../shared/agent-tree";
 import { allPages } from "../server/pagination";
-import { CONFIG_LABEL, MEMBER_LABEL, researchFromLegacy, runtimeFile, TEAM_LABEL } from "../shared/research-team";
+import { CONFIG_LABEL, MEMBER_LABEL, runtimeFile, TEAM_LABEL } from "../shared/research-team";
 import { teamFixture } from "./fixtures/research";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -43,27 +43,27 @@ async function fixture() {
 describe("research sessions", () => {
   it("keeps research members visible in All agents without legacy waiting duplicates", async () => {
     const f = await fixture();
-    await applyResearch({ workspaceId: "wks", team: teamFixture(), migrateLegacy: false, bindings: {} }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
     await writeFile(join(f.root, ".agents/teams/legacy.json"), JSON.stringify({ version: 1, goal: "Legacy team", orchestrator: { workspace: "legacy", provider: "test", model: "m" }, roles: [{ name: "legacy-coder", provider: "test", model: "m", folders: [], instructions: "Implement" }] }));
-    const roster = await teamRoster({ workspaceId: "wks" }, f.ctx);
-    expect(roster.errors).toEqual([]);
-    expect(roster.teams).toHaveLength(1);
-    expect(roster.teams[0]!.roles.map(role => role.name)).toEqual(["legacy-coder"]);
+    const [project] = await projectTeamsList({}, f.ctx);
+    expect(project!.errors).toEqual([]);
+    expect(project!.teams).toHaveLength(1);
+    expect(project!.teams[0]).toMatchObject({ roles: 2, members: 3 });
     const agents = f.agents.map((agent, index) => ({ ...agent, createdAt: `2026-11-10T00:00:0${index}Z` }));
-    const forest = filterForest(buildAgentForest(agents, ["wks"], { showClosed: false, roster: roster.teams }), "idle");
+    const forest = filterForest(buildAgentForest(agents, ["wks"], { showClosed: false }), "idle");
     const nodes = [...forest.trees, ...forest.solo];
     expect(nodes.map(node => node.agent.id).sort()).toEqual(agents.map(agent => agent.id).sort());
     expect(nodes.every(node => !node.waiting && node.children.length === 0)).toBe(true);
   });
   it("creates idle independent members with exact Profile settings and reuses them by identity", async () => {
     const f = await fixture(), team = teamFixture();
-    await applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: { "coder-a": "profile" } }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: { "coder-a": "profile" } }, f.ctx);
     expect(f.create).toHaveBeenCalledTimes(3);
     expect(f.create.mock.calls.every(([options]) => options.prompt === undefined && !("parent" in options))).toBe(true);
     expect(f.configs[1]).toMatchObject({ provider: "test/m", modeId: "ask", thinkingOptionId: "high", featureValues: { feature: { enabled: false } } });
     expect(f.configs[2]).not.toHaveProperty("modeId");
     expect(f.configs.every(config => String(config.systemPrompt).includes("common standing instructions"))).toBe(true);
-    await Promise.all([applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx), applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx)]);
+    await Promise.all([applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx), applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx)]);
     expect(f.create).toHaveBeenCalledTimes(3);
     const directory = JSON.parse(await readFile(join(f.root, runtimeFile(team.id)), "utf8"));
     expect(new Set(directory.members.map((m: {agentId: string}) => m.agentId)).size).toBe(3);
@@ -72,9 +72,9 @@ describe("research sessions", () => {
   });
   it("marks changed prompts pending, resets only the selected member and retains other sessions", async () => {
     const f = await fixture(), team = teamFixture();
-    await applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     await writeFile(join(f.root, "prompts/programmer.md"), "New programmer instructions");
-    await applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     expect(f.create).toHaveBeenCalledTimes(3);
     const read = await readResearch({ workspaceId: "wks" }, f.ctx);
     expect(read.members.map(m => m.pending)).toEqual([false, true, true]);
@@ -88,24 +88,22 @@ describe("research sessions", () => {
   it("recovers partial creation and rejects missing prompts before creating any sessions", async () => {
     const f = await fixture(), team = teamFixture();
     await rm(join(f.root, "prompts/anchor.md"));
-    await expect(applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx)).rejects.toThrow();
+    await expect(applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx)).rejects.toThrow();
     expect(f.create).not.toHaveBeenCalled();
     await writeFile(join(f.root, "prompts/anchor.md"), "Anchor");
     f.fail("coder-b");
-    await expect(applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx)).rejects.toThrow("simulated");
+    await expect(applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx)).rejects.toThrow("simulated");
     f.fail("");
-    await applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     expect(f.agents).toHaveLength(3);
   });
-  it("preserves v2 through legacy listing, restoration and workspace reconnection", async () => {
+  it("preserves the member model through listing, restoration and workspace reconnection", async () => {
     const f = await fixture(), team = teamFixture();
-    const applied = await applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx);
+    const applied = await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     const listing = await projectTeams({ id: "prj", name: "Research", root: f.root });
-    expect(listing.teams[0]!.research?.members).toHaveLength(3);
+    expect(listing.teams[0]!.team.members).toHaveLength(3);
     await restoreTeam({ projectId: "prj", file: listing.teams[0]!.file }, f.ctx);
     expect(f.create).toHaveBeenCalledTimes(3);
-    const result = await applyTeam({ workspaceId: "wks", team: listing.teams[0]!.team }, f.ctx);
-    expect(result.ok).toBe(false);
     f.workspace.title = "renamed";
     await reconnectTeam({ projectId: "prj", file: listing.teams[0]!.file, workspaceId: "wks" }, f.ctx);
     const stored = JSON.parse(await readFile(applied.file, "utf8"));
@@ -115,51 +113,84 @@ describe("research sessions", () => {
   });
   it("refuses ambiguous active sessions instead of silently choosing a same-role agent", async () => {
     const f = await fixture(), team = teamFixture();
-    await applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     f.agents.push({ ...f.agents[1]!, id: "duplicate" });
-    await expect(applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: {} }, f.ctx)).rejects.toThrow("Multiple sessions");
+    await expect(applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx)).rejects.toThrow("Multiple sessions");
     expect(f.agents[0]!.labels[TEAM_LABEL]).toBe(team.id);
     expect(f.agents[0]!.labels[CONFIG_LABEL]).toHaveLength(64);
   });
-  it("converts v1 only on explicit application and preserves its instructions", async () => {
+  it("ignores retired definitions without converting files, prompts or sessions", async () => {
     const f = await fixture();
-    const legacy = { version: 1 as const, goal: "Research", orchestrator: { workspace: "research", provider: "test", model: "m" }, roles: [{ name: "proof", provider: "test", model: "m", folders: [], instructions: "Check all assumptions independently." }] };
+    const legacy = { version: 1, goal: "Old team", orchestrator: { workspace: "research", provider: "test", model: "m" }, roles: [{ name: "proof", provider: "test", model: "m", instructions: "Old instructions" }] };
     await mkdir(join(f.root, ".agents/teams"), { recursive: true });
-    await writeFile(join(f.root, ".agents/teams/legacy.json"), JSON.stringify(legacy));
-    const team = researchFromLegacy(legacy);
-    team.members.forEach(member => { member.launchSnapshot = { provider: "test", model: "m", modeId: "ask" }; });
-    await expect(applyResearch({ workspaceId: "wks", team, bindings: {}, migrateLegacy: false }, f.ctx)).rejects.toThrow("another team");
-    expect(JSON.parse(await readFile(join(f.root, ".agents/teams/legacy.json"), "utf8")).version).toBe(1);
-    await applyResearch({ workspaceId: "wks", team, bindings: {}, migrateLegacy: true }, f.ctx);
-    expect(await readFile(join(f.root, "prompts/research-team/role-1.md"), "utf8")).toBe(legacy.roles[0]!.instructions);
-    expect(f.configs.some(config => String(config.systemPrompt).includes(legacy.roles[0]!.instructions))).toBe(true);
-    expect(JSON.parse(await readFile(join(f.root, ".agents/teams/legacy.json"), "utf8")).version).toBe(2);
+    const oldFile = join(f.root, ".agents/teams/research.json"), original = JSON.stringify(legacy);
+    await writeFile(oldFile, original);
+    const empty = await readResearch({ workspaceId: "wks" }, f.ctx);
+    expect(empty.team).toBeNull();
+    expect(empty.file).toBeNull();
+    expect(empty.errors).toEqual([]);
+    const created = await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
+    expect(created.file).toBe(join(f.root, ".agents/teams/research-2.json"));
+    expect(await readFile(oldFile, "utf8")).toBe(original);
+    expect(f.archive).not.toHaveBeenCalled();
+    expect((await readResearch({ workspaceId: "wks" }, f.ctx)).team?.members).toHaveLength(3);
+    await expect(deleteTeam({ projectId: "prj", file: ".agents/teams/research.json" }, f.ctx)).rejects.toThrow("not a team file");
+    await expect(restoreTeam({ projectId: "prj", file: ".agents/teams/research.json" }, f.ctx)).rejects.toThrow("not a team file");
+  });
+  it("refuses duplicate definitions instead of silently choosing a team", async () => {
+    const f = await fixture(), team = teamFixture();
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
+    await writeFile(join(f.root, ".agents/teams/duplicate.json"), JSON.stringify({ ...team, id: "different" }));
+    expect((await readResearch({ workspaceId: "wks" }, f.ctx)).errors.join(" ")).toContain("multiple teams");
+    await expect(applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx)).rejects.toThrow("multiple teams");
   });
   it("adds a new role without resetting existing members and archives removed members", async () => {
     const f = await fixture(), team = teamFixture();
-    await applyResearch({ workspaceId: "wks", team, bindings: {}, migrateLegacy: false }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     await writeFile(join(f.root, "prompts/review.md"), "Review evidence");
     team.roles.push({ id: "review", name: "Review", promptFiles: ["prompts/review.md"] });
     team.members.push({ id: "reviewer", roleId: "review", launchSnapshot: { provider: "test", model: "m" } });
-    await applyResearch({ workspaceId: "wks", team, bindings: {}, migrateLegacy: false }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     expect(f.create).toHaveBeenCalledTimes(4);
     expect((await readResearch({ workspaceId: "wks" }, f.ctx)).members.every(member => !member.pending)).toBe(true);
     team.members = team.members.filter(member => member.id !== "coder-b");
-    await applyResearch({ workspaceId: "wks", team, bindings: {}, migrateLegacy: false }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     expect(f.agents.find(agent => agent.id === "agent-3")!.archivedAt).toBe("now");
     expect(f.agents.find(agent => agent.id === "agent-1")!.archivedAt).toBeNull();
   });
   it("deletes only labelled team members and rebuilds a damaged runtime directory", async () => {
     const f = await fixture(), team = teamFixture();
-    const applied = await applyResearch({ workspaceId: "wks", team, bindings: {}, migrateLegacy: false }, f.ctx);
+    const applied = await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     await writeFile(join(f.root, runtimeFile(team.id)), "broken json");
-    await applyResearch({ workspaceId: "wks", team, bindings: {}, migrateLegacy: false }, f.ctx);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     expect(f.create).toHaveBeenCalledTimes(3);
     f.agents.push({ ...f.agents[1]!, id: "outside-team", labels: { role: "programmer" } });
     const listing = await projectTeams({ id: "prj", name: "Research", root: f.root });
     await deleteTeam({ projectId: "prj", file: listing.teams[0]!.file }, f.ctx);
     expect(f.agents.find(agent => agent.id === "outside-team")!.archivedAt).toBeNull();
     expect(f.archive).toHaveBeenCalledTimes(3);
+  });
+  it("retains the definition after an archive failure so deletion can be retried", async () => {
+    const f = await fixture();
+    const applied = await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
+    const file = ".agents/teams/research.json";
+    f.archive.mockRejectedValueOnce(new Error("offline"));
+    const failed = await deleteTeam({ projectId: "prj", file }, f.ctx);
+    expect(failed.files).toEqual([]);
+    expect(failed.failures).toHaveLength(1);
+    expect(JSON.parse(await readFile(applied.file, "utf8")).version).toBe(2);
+    const retried = await deleteTeam({ projectId: "prj", file }, f.ctx);
+    expect(retried.failures).toEqual([]);
+    expect(retried.files).toEqual([file]);
+  });
+  it("refuses reconnecting to another team's Workspace", async () => {
+    const f = await fixture(), team = teamFixture();
+    const applied = await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
+    await writeFile(join(f.root, ".agents/teams/other.json"), JSON.stringify({ ...team, id: "other", workspace: "occupied" }));
+    f.workspace.title = "occupied";
+    const result = await reconnectTeam({ projectId: "prj", file: ".agents/teams/research.json", workspaceId: "wks" }, f.ctx);
+    expect(result.ok).toBe(false);
+    expect(JSON.parse(await readFile(applied.file, "utf8")).workspace).toBe("research");
   });
   it("rejects prompt traversal and symlinks outside the project", async () => {
     const f = await fixture();

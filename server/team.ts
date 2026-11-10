@@ -407,7 +407,7 @@ export async function restoreTeam({ projectId, file }: RpcInput<typeof teamResto
   const saved = teams.find((entry) => entry.file === file);
   if (!saved) return { ok: false, errors: [`Team file ${file} was not found.`] };
   if (saved.research) {
-    const result = await applyResearch({ projectId, team: saved.research, bindings: {}, migrateLegacy: false }, ctx);
+    const result = await applyResearch({ projectId, team: saved.research, bindings: {} }, ctx);
     return { ok: true, file: result.file, workspaces: [{ target: "orchestrator", workspace: saved.research.workspace, id: result.workspaceId, created: false }], orchestratorAgentId: result.orchestratorAgentId, cleanup: [], permission: null };
   }
   return applyTeam({ projectId, team: saved.team }, ctx);
@@ -416,7 +416,7 @@ export async function restoreTeam({ projectId, file }: RpcInput<typeof teamResto
 export async function applyTeam({ team: input, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamApplyRpc>> {
   if (ResearchTeamSchema.safeParse(input).success) {
     const team = ResearchTeamSchema.parse(input);
-    const result = await applyResearch({ ...target, team, bindings: {}, migrateLegacy: false }, { paseo });
+    const result = await applyResearch({ ...target, team, bindings: {} }, { paseo });
     return { ok: true, file: result.file, workspaces: [{ target: "orchestrator", workspace: team.workspace, id: result.workspaceId, created: false }], orchestratorAgentId: result.orchestratorAgentId, cleanup: [], permission: null };
   }
   const checked = checkTeam(input);

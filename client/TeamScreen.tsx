@@ -8,9 +8,10 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-nati
 import { withAlpha } from "../shared/color";
 import { activityCounts, filterForest, forestActivityCounts, type ActivityFilter, type AgentForest, type AgentNode } from "../shared/agent-tree";
 import { messages } from "./i18n";
-import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
+import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/research-rpc";
 import { AgentDashboardView, ClosedControls, DEFAULT_STATE, DensityToggle, useDashboardData, type DashboardState } from "./AgentDashboard";
-import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
+import { PROJECT_TEAMS_KEY, TeamEditor } from "./TeamPanel";
+import { Button, styles } from "./ui";
 
 export const SCREEN_ID = "team";
 
@@ -108,18 +109,20 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
     onError: (error) => toast.error(String(error)),
   });
 
-  const openApplied = (result: Extract<RpcOutput<typeof teamRestoreRpc>, { ok: true }>) => {
-    if (result.cleanup.length) toast.error(t("result.cleanupFailed", { failure: result.cleanup.join("; ") }));
-    navigation?.openWorkspace({ workspaceId: result.workspaces[0]!.id });
+  const openApplied = (result: RpcOutput<typeof teamRestoreRpc>) => {
+    setProjectId(null);
+    invalidateTeams();
+    navigation?.openWorkspace({ workspaceId: result.workspaceId });
+    openTeamPanel?.(result.workspaceId);
   };
   const restored = useMutation({
     mutationFn: (input: { projectId: string; file: string }) => restore(input),
     onSuccess: (result) => {
-      if (!result.ok) return;
       setReconnecting(null);
       invalidateTeams();
       openApplied(result);
     },
+    onError: (error) => toast.error(String(error)),
   });
   const reconnectBusy = reconnected.isPending || restored.isPending;
 
@@ -179,7 +182,7 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: team.workspaceId ? theme.colors.accent : theme.colors.statusWarning }} />
               <Text style={[s.text, { flex: 1, minWidth: 0, fontSize: 14, fontWeight: "700" }]}>{team.orchestratorWorkspace}</Text>
-              <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
+              <Text style={s.muted}>{t("research.ui.memberCount", { count: team.members })} · {t("research.ui.roleCount", { count: team.roles })}</Text>
             </View>
             {team.goal ? <Text style={s.muted} numberOfLines={2}>{team.goal}</Text> : null}
             {!team.workspaceId ? <Text style={{ color: theme.colors.statusWarning, fontSize: 12 }}>{t("screen.workspaceMissing")}</Text> : null}
@@ -207,7 +210,6 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
                 {reconnectBusy ? <View style={s.row}><ActivityIndicator color={theme.colors.accent} /><Text style={s.muted}>{t(restored.isPending ? "result.applying" : "loading")}</Text></View> : null}
                 {restored.variables?.projectId === project.id && restored.variables.file === team.file ? <>
                   {restored.error ? <Text style={s.danger}>{String(restored.error)}</Text> : null}
-                  {restored.data && !restored.data.ok ? restored.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
                 </> : null}
               </View>
             ) : null}
@@ -232,7 +234,6 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
                     <AgentDashboardView
                       data={dashboard}
                       workspaceIds={ids}
-                      rosterWorkspaceId={ids[0] ?? null}
                       state={dashState}
                       setState={setDashState}
                       colors={theme.colors}
