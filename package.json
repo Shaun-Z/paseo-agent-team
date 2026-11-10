@@ -2,7 +2,7 @@
   "name": "paseo-agent-team",
   "private": true,
   "version": "0.2.15",
-  "description": "Project-scoped agent teams for Paseo: one role per workspace, each with its own provider and model, led by an orchestrator.",
+  "description": "Project-scoped agent teams with reusable member sessions and profile-based research collaboration.",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -10,7 +10,8 @@
     "index.server.ts",
     "client/",
     "server/",
-    "shared/"
+    "shared/",
+    "templates/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

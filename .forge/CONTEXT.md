@@ -13,7 +13,7 @@ _Avoid_: 팀, 그룹
 _Avoid_: 봇, 슬롯
 
 **역할 (Role)**:
-팀 정의에서 이름과 provider/모델의 묶음(예: design → codex). 자기 워크스페이스는 없고 오케스트레이터의 워크스페이스에서 돈다.
+v1에서는 이름과 provider/모델의 묶음이다. v2에서는 사용자가 정의한 책임과 로컬 prompt 파일의 묶음이며, 여러 팀원이 같은 역할을 맡을 수 있다. 모든 역할 세션은 팀의 워크스페이스에서 돈다.
 _Avoid_: 페르소나, 봇
 
 **오케스트레이터 (Orchestrator)**:
@@ -27,3 +27,6 @@ _Avoid_: 탭, 봇
 **팀 정의 (Team definition)**:
 프로젝트 레포 안에 저장되어 git으로 관리되는, 팀 하나의 역할 목록 원본. 오케스트레이터 워크스페이스 하나에 속하며, 워크스페이스마다 파일 하나(`.agents/teams/`)를 둔다.
 _Avoid_: 로스터, 팀 설정
+
+**팀원 (Team member)**:
+v2 팀 정의의 고유한 memberId와 Role 참조, 사용자가 선택한 Agent Profile의 시작 설정 스냅샷을 가진다. 팀원마다 재사용하는 Role session 하나를 두며, 세션을 초기화해도 memberId는 유지한다. Orchestrator는 구체적인 팀원 하나를 가리킨다.

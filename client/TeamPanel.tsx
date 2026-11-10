@@ -1,3 +1,5 @@
+import { ResearchTeamEditor } from "./ResearchTeam";
+import { researchReadRpc } from "../shared/research-rpc";
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
@@ -422,7 +424,18 @@ export function TeamPanel({ workspaceId, ...props }: PluginWorkspacePanelProps) 
 }
 
 /** Propose, review and apply a team for the target's project. */
-export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pick<PluginScreenProps, "theme" | "layout" | "navigation"> & { target: Target; onApplied?(result: Applied): void }) {
+type EditorProps = Pick<PluginScreenProps, "theme" | "layout" | "navigation"> & { target: Target; onApplied?(result: Applied): void };
+export function TeamEditor(props: EditorProps) {
+  const read = useRpc(researchReadRpc);
+  const { t } = useTranslation(messages);
+  const query = useQuery({ queryKey: ["research", props.target], queryFn: () => read(props.target) });
+  const [research, setResearch] = useState(false);
+  if (query.isLoading) return <Text style={{ color: props.theme.colors.foregroundMuted }}>{t("loading")}</Text>;
+  if (query.error) return <Text style={{ color: props.theme.colors.statusDanger }}>{String(query.error)}</Text>;
+  if (research || query.data?.team) return <ResearchTeamEditor {...props} onBack={query.data?.team ? undefined : () => setResearch(false)} />;
+  return <LegacyTeamEditor {...props} onResearch={() => setResearch(true)} />;
+}
+function LegacyTeamEditor({ theme, layout, navigation, target, onApplied, onResearch }: EditorProps & { onResearch(): void }) {
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
   const { t } = useTranslation(messages);
   const queryClient = useQueryClient();
@@ -640,6 +653,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
       <Text style={s.title}>{t("title", { project: data.project.name })}</Text>
+      <Button s={s} secondary label={t("research.create")} onPress={onResearch} />
       <Text style={s.muted}>{data.project.root}/{data.file ?? `${TEAMS_DIR}/`}</Text>
 
       {data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}

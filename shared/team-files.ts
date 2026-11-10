@@ -1,3 +1,4 @@
+import type { ResearchTeam } from "./research-team";
 import type { Team } from "./team";
 import type { TeamError } from "./validate";
 
@@ -8,6 +9,7 @@ export const TEAMS_DIR = ".agents/teams";
 export interface TeamFile {
   file: string;
   team: Team;
+  research?: ResearchTeam;
   /** Old role workspace titles, reserved until the file is rewritten without them. */
   legacyWorkspaces?: string[];
 }

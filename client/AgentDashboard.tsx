@@ -1,3 +1,5 @@
+import { ResearchGraph } from "./ResearchTeam";
+import { researchReadRpc } from "../shared/research-rpc";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTabState, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
@@ -1172,6 +1174,12 @@ function AnimationAnchor({ value }: { value: Animated.Value }) {
 }
 
 export function AgentDashboard(props: PluginWorkspacePanelProps) {
+  const read = useRpc(researchReadRpc);
+  const query = useQuery({ queryKey: ["research", { workspaceId: props.workspaceId }], queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000 });
+  if (query.data?.team) return <ScrollView><ResearchGraph {...props} data={query.data} /></ScrollView>;
+  return <LegacyAgentDashboard {...props} />;
+}
+function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
   const paseo = usePaseo();
   const client = useQueryClient();
   const { t } = useTranslation(messages);

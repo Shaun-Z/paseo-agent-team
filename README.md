@@ -6,6 +6,28 @@ For example, in a game project, design work can go to Codex, sound to Antigravit
 
 ![Reviewing a proposed team: the orchestrator card on top and six roles (core, ui, qa, docs, release, review) in three columns below it, each with a role name, provider and model, folders or a Set folders button, and instructions](images/create-agent-team.png)
 
+
+## Research teams with Agent Profiles
+
+The **Agent team** panel now offers **Configure a research team**. Research teams use a version 2 team definition: users define Roles with local prompt files, then configure named members using Paseo Agent Profiles. Several members can share a Role or a Profile. Select a specific member as the Orchestrator. All members share one Workspace and keep independent, reusable sessions.
+
+1. Configure the desired Agent Profiles in Paseo Host settings and enable Paseo tools for the selected providers.
+2. Create the common and role prompt files in your Project. Starter files are provided in `templates/research/prompts/`; copy them into your Project's `prompts/` and edit them for your research.
+3. Open **Agent teams → New team → Configure a research team**, or the existing workspace's **Agent team** panel. Choose a Profile for every member, add or remove Roles and members, select the Orchestrator, and Apply.
+4. Open any node in the relationship graph to talk directly to that member. Ask the Orchestrator to wake the configured members it needs. Members use Paseo's native communication and are instructed to organize findings or blockers before proactively reporting them.
+
+Apply prepares idle member sessions without issuing research tasks. Reapplying reuses them by team and member identity. Changed prompts or Profile snapshots are marked pending; **Reset member session** explicitly archives only that member's session and creates a fresh one. Renaming the Workspace uses the existing **Reconnect** flow. Applying a research configuration over a v1 team explicitly converts it, archives the old team agents and preserves legacy Role instructions in local files without overwriting existing prompts.
+
+Version 2 files remain in `.agents/teams/` (or the existing `.agents/team.json`). They store Role definitions and launch parameter snapshots; local Profile bindings and live agent IDs are stored in `.agents/.runtime/paseo-agent-team/`, which Apply excludes from git. Editing a Paseo Profile does not silently change a running member: reselect the Profile, Apply, then explicitly reset that member if its configuration changed.
+
+The graph keeps every configured member visible, including idle members of the same Role. It draws actual communication between members and lists messages from their current sessions. Finished/error/permission callbacks are excluded from ordinary message counts. Archived conversations remain in Paseo history. Users can enter any member's native chat to intervene; steering and interruption depend on that provider.
+
+Below the graph, **Team timeline** merges current and archived sessions of configured members. Filter by member, sender, recipient, activity type, local date/time or text. Click an arrow's message count or a message direction to filter that exchange; matching graph connections are highlighted. Expand a record to read the full text or tool details, or open its native conversation or the sender's conversation. Tool details start collapsed. This is a read-only user view and sends no history into the Orchestrator's context.
+
+For agy, use the `antigravity-cli` adapter's ACP path with **Share Paseo tools with Antigravity** enabled. The built-in `antigravity` adapter cannot inject Paseo tools. Pi tool availability depends on its installed integration. Native communication has been tested with an Antigravity CLI coordinator and two Codex members using saved Profiles; other provider combinations and restart recovery still need live validation. Automated server tests use a simulated Paseo API.
+
+The following legacy creation and orchestration sections describe version 1 teams. Version 1 reading and management remain available. See [research-team design](docs/research-team-design.md) for the v2 data model and interface checks.
+
 ## Concepts
 
 | Term | Meaning |
@@ -193,6 +215,12 @@ The plugin's UI follows Paseo's app language. English is the default, and Englis
 
 ## Limitations
 
+For v2 research teams, launch modes and features come from the user-selected Profile snapshot. Automatic mode selection described below applies to v1 teams. All members must use the Project checkout in one Workspace. Role reporting rules are prompt instructions; the plugin does not summarize or relay their research conversations.
+
+Codex Auto-review can reject a tool call requested through a peer message if it does not recognize a user-authorized task scope in that member's conversation. In the live arithmetic test, an explicit user approval delivered to both Codex members allowed the native chain to complete. The plugin preserves the chosen Profile and does not grant task permissions automatically.
+
+The research timeline uses timestamps supplied by Paseo. Some providers reconstruct historical timestamps; equal timestamps cannot establish ordering across sessions. Local replies are displayed without inferring recipients. History includes reset sessions of members still in the team definition; removed members' histories remain accessible through Paseo's archives. The timeline backfills these histories when opened and renders 100 matching records at a time; very long histories can take longer to load. Native navigation opens a conversation, since the plugin API does not expose jumping to a specific message.
+
 - A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in the team's workspace from Paseo's own UI still use whatever model you pick there.
 - A team's file is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team from it until the two match again. Paseo has no rename event, so after renaming in Paseo, press **Reconnect** on the team's row (or edit `orchestrator.workspace` in the file) to reattach it.
 - All roles run in one workspace, so they share one checkout and folder. Keep roles to separate folders, or have the orchestrator run overlapping work in sequence.
@@ -204,7 +232,7 @@ The plugin's UI follows Paseo's app language. English is the default, and Englis
 - The `<role>#<id>` agent title is an instruction in the orchestrator's prompt, not something the plugin enforces, so an agent may be titled differently. An orchestrator keeps the instructions it started with until its session is reset with **Reset session**.
 - Paseo's sidebar puts a workspace it hasn't seen yet at the top of its project, so a workspace that Apply creates appears there. A workspace you already have keeps its place. The plugin cannot set the sidebar order.
 - Sending `/clear` in the orchestrator's chat makes Paseo archive that agent and start a new one in the same workspace with no labels and no instructions, so the plugin no longer treats it as the team's orchestrator and it loses the team's instructions. Use **Reset session** in the team panel instead: after a confirmation it archives the labelled orchestrator and starts a new one with the same team, provider, model, mode and instructions, read from the team file, and role sessions are kept. Close the agent that `/clear` created yourself.
-- Very long workspace or agent lists are read as a single page. On hosts with a lot of workspaces, an existing workspace could be missed and created again, and the agent dashboard can miss agents beyond that page. Team delete has the same gap: team agents beyond the page are not archived.
+- The legacy agent dashboard reads one page of workspace and agent lists, so it can miss agents on large hosts. Server-side team matching, member management and deletion follow pagination.
 - On Paseo hosts without client navigation, the agent dashboard cards are not pressable.
 - Sub-agents started before the dashboard opened are found in the last 200 timeline items of each unarchived agent in the project. Opening the dashboard reads one such page per agent, so a project with many agents makes many requests.
 - The plugin cannot delete agents. Paseo's plugin API offers only archive (checked up to `@getpaseo/client` 0.15.2), so the dashboard's × can only hide an agent in that tab, and the agent stays in Paseo.
@@ -218,6 +246,7 @@ npm install            # .npmrc sets legacy-peer-deps, which works around an npm
 npm run typecheck
 npm test               # unit tests
 PASEO_E2E=1 npx vitest run tests/daemon.e2e.test.ts   # against the local daemon
+PASEO_RESEARCH_E2E=1 npx vitest run tests/research-live.e2e.test.ts   # native three-member communication, saved Profiles
 paseo plugin reload paseo-agent-team
 paseo plugin logs paseo-agent-team
 ```
@@ -225,3 +254,7 @@ paseo plugin logs paseo-agent-team
 The end-to-end test starts real agents (a planner and an orchestrator) in a temporary project under the system temp folder, so it costs tokens. It connects to `ws://127.0.0.1:6767/ws` unless `PASEO_URL` is set.
 
 Layout: `shared/` holds the team schema, validation, prompts, RPC contracts and UI text, and is compiled into both sides. `server/` holds the daemon-side RPC handlers. `client/` holds the panel. `tests/` holds the Vitest suites.
+
+The opt-in research live test uses Profiles named `Anchor`, `Programmer`, and `Mathematician` from the connected Host. Set `PASEO_RESEARCH_PROFILES` to a JSON object mapping `anchor`, `programmer`, and `mathematician` to Profile IDs or names when needed. It preserves their launch settings, creates a temporary Project, and tests the native message chain and independent member reset. After stopping test activity, it retains the Workspace and sessions for user review by default. The reset check archives the original Programmer session; its communication remains in the team timeline and Paseo history. Set `PASEO_RESEARCH_ARCHIVE=1` to explicitly archive the test Workspace after the run. The test starts real model turns and writes `smoke-report.json` in the temporary Project for inspection.
+
+When a provider uses automatic approval review, a peer message may still require a user-authorized task scope. Keep the selected Profile unchanged and ask for approval if review rejects a send. After the user explicitly approves the isolated arithmetic probe, `PASEO_RESEARCH_PEER_APPROVAL=1` makes the live test deliver that bounded approval to its two worker sessions before starting the message chain; it does not change modes or permission settings.

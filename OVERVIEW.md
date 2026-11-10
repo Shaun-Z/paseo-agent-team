@@ -14,6 +14,21 @@ Request flow:
 request → orchestrator → roles (each with its own provider/model) → results back to orchestrator
 ```
 
+
+## Research teams
+
+Version 2 teams separate extensible Role definitions, user-selected Agent Profile settings, named members and their live sessions. Users preconfigure the member list and select one member as Orchestrator. A Role can have multiple members on different providers or models. Common and Role prompts are loaded from local Project files when member sessions are created.
+
+The team panel provides a Profile-based member editor and explicit per-member session reset. Apply creates or reuses independent idle sessions in one shared Workspace. It does not submit research tasks. The Orchestrator wakes members through Paseo's native agent communication; member instructions call for proactive, curated reports of significant findings and blockers. Ordinary discussion and raw runtime notifications are not forwarded by the plugin into the Orchestrator's conversation.
+
+The member graph shows every configured member, status, pending configuration and the latest observed request. It draws directed communication observed in current session timelines and opens native chats for direct user intervention. Archived session history is retained by Paseo and is not included in current-session message counts.
+
+The team timeline below the graph merges current and archived sessions of configured members. It separates delivered member messages, user instructions, local replies, tools and events. Users can filter participants, activity, local date/time and text, expand records, and open related native conversations. Selecting an arrow count or message direction filters the exchange and highlights matching graph connections. Tool details start collapsed. The timeline only observes history and does not send it into the Orchestrator's conversation.
+
+Profile launch settings are copied into the team's file. Host-local Profile bindings and agent IDs are kept in a git-excluded runtime directory. Changing the original Profile does not update existing sessions. A v1 team can be explicitly converted on Apply; its old agents are archived and Role instructions are preserved in local prompt files without replacing existing files. Removing a member and applying archives that member's session.
+
+Shared-Workspace teams require the Project checkout. Tool injection must be available for each selected provider. The built-in Antigravity adapter does not expose Paseo tools; the separate `antigravity-cli` adapter supports opt-in sharing through ACP. Native communication has been verified with an Antigravity CLI coordinator and two Codex members using saved Profiles. Other provider combinations and restart recovery need live validation. Codex Auto-review may require a user-authorized task scope in a member's conversation before allowing a peer-requested tool call; the plugin does not grant that permission automatically.
+
 ## Requirements
 
 - Paseo 0.13.0 or newer, and at least one ready provider on the host.
@@ -146,6 +161,7 @@ English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-si
 
 ## Limitations
 
+- **Research history.** Ordering uses Paseo timestamps, which some providers reconstruct when restoring history. Equal timestamps do not establish cross-session order. Members removed from the team definition are omitted; their sessions remain in Paseo's archives. Long histories are backfilled on opening and rendered 100 records at a time. Navigation opens conversations rather than specific messages.
 - **Shared checkout.** All roles run in the orchestrator's workspace and share one project checkout. Folder assignments guide agents but do not enforce filesystem isolation. Avoid overlapping work, or ask the orchestrator to sequence it.
 - **Model scope.** A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in the team's workspace from Paseo's own UI still use whatever model you pick there.
 - **Workspace matching.** A team is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team until the two match again. Paseo has no rename event, so after renaming in Paseo, press **Reconnect** on the team's row, or edit `orchestrator.workspace` in the file.
@@ -154,7 +170,7 @@ English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-si
 - **Auto Accept starts.** A role that uses the Auto Accept feature is started with Paseo's `create_agent` tool, because `paseo run` cannot set features. The orchestrator needs that MCP tool. If it cannot use the tool or the start is denied, it reports the role, provider, mode and features as blocked and does not fall back to `paseo run`.
 - **Agent titles.** The `<role>#<id>` title is an instruction in the orchestrator's prompt, not something the plugin enforces, so an agent may be titled differently. An orchestrator keeps the instructions it started with until its session is reset with **Reset session**.
 - **Sidebar order.** Paseo's sidebar puts a workspace it has not seen yet at the top of its project, so a workspace that Apply creates appears there. A workspace you already have keeps its place. The plugin cannot set the sidebar order.
-- **Single-page lists.** Workspace and agent lists are read as a single page. Very long lists can therefore make an existing workspace get missed and created again, and the agent dashboard can miss agents beyond that page. Team delete has the same gap: team agents beyond the page are not archived.
+- **Legacy dashboard lists.** The legacy agent dashboard reads one page of workspace and agent lists and can miss agents on large hosts. Server-side team matching, member management and deletion follow pagination.
 - **Client navigation.** On Paseo hosts without client navigation, the agent dashboard cards cannot be pressed.
 - **Sub-agent discovery.** Sub-agents started before the dashboard opened are found in the last 200 timeline items of each unarchived agent in the project. Opening the dashboard reads one such page per agent, so a project with many agents makes many requests.
 - **Sub-agent status.** A sub-agent found in that window takes its status from the timeline. It can read as finished while a background sub-agent is still running, until its next activity arrives.
