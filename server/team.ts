@@ -152,7 +152,10 @@ export async function teamRoster({ workspaceId }: RpcInput<typeof teamRosterRpc>
   const { teams, errors } = await projectTeams(project);
   const idOf = (title: string) => teamWorkspaceId(entries, project.id, title);
   return {
-    teams: teams.map(({ team }) => {
+    // Legacy waiting cards match labels.role by name. Research members have their
+    // own identities and waiting states in ResearchGraph; the generic dashboard
+    // must show their actual sessions without inventing duplicate waiting roles.
+    teams: teams.filter(({ research }) => !research).map(({ team }) => {
       const orchestratorWorkspaceId = idOf(team.orchestrator.workspace);
       return {
         orchestratorWorkspaceId,

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyResearch, readPrompt, readResearch, resetResearchMember } from "../server/research-team";
-import { projectTeams, applyTeam, reconnectTeam, restoreTeam, deleteTeam } from "../server/team";
+import { projectTeams, applyTeam, reconnectTeam, restoreTeam, deleteTeam, teamRoster } from "../server/team";
+import { buildAgentForest, filterForest } from "../shared/agent-tree";
 import { allPages } from "../server/pagination";
 import { CONFIG_LABEL, MEMBER_LABEL, researchFromLegacy, runtimeFile, TEAM_LABEL } from "../shared/research-team";
 import { teamFixture } from "./fixtures/research";
@@ -40,6 +41,20 @@ async function fixture() {
   return { root, ctx, workspace, agents, configs, create, archive, fail: (member: string) => { failMember = member; } };
 }
 describe("research sessions", () => {
+  it("keeps research members visible in All agents without legacy waiting duplicates", async () => {
+    const f = await fixture();
+    await applyResearch({ workspaceId: "wks", team: teamFixture(), migrateLegacy: false, bindings: {} }, f.ctx);
+    await writeFile(join(f.root, ".agents/teams/legacy.json"), JSON.stringify({ version: 1, goal: "Legacy team", orchestrator: { workspace: "legacy", provider: "test", model: "m" }, roles: [{ name: "legacy-coder", provider: "test", model: "m", folders: [], instructions: "Implement" }] }));
+    const roster = await teamRoster({ workspaceId: "wks" }, f.ctx);
+    expect(roster.errors).toEqual([]);
+    expect(roster.teams).toHaveLength(1);
+    expect(roster.teams[0]!.roles.map(role => role.name)).toEqual(["legacy-coder"]);
+    const agents = f.agents.map((agent, index) => ({ ...agent, createdAt: `2026-11-10T00:00:0${index}Z` }));
+    const forest = filterForest(buildAgentForest(agents, ["wks"], { showClosed: false, roster: roster.teams }), "idle");
+    const nodes = [...forest.trees, ...forest.solo];
+    expect(nodes.map(node => node.agent.id).sort()).toEqual(agents.map(agent => agent.id).sort());
+    expect(nodes.every(node => !node.waiting && node.children.length === 0)).toBe(true);
+  });
   it("creates idle independent members with exact Profile settings and reuses them by identity", async () => {
     const f = await fixture(), team = teamFixture();
     await applyResearch({ workspaceId: "wks", team, migrateLegacy: false, bindings: { "coder-a": "profile" } }, f.ctx);

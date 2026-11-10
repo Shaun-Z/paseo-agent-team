@@ -1,7 +1,7 @@
 {
   "name": "paseo-agent-team",
   "private": true,
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "Project-scoped agent teams with reusable member sessions and profile-based research collaboration.",
   "files": [
     "paseo-plugin.json",

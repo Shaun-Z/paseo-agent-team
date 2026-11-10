@@ -188,12 +188,13 @@ Team 面板提供研究团队编辑入口和 Profile 选择。v1 团队可经用
 ## 本次验证记录
 
 - `npm run typecheck` 通过。
-- `npm test` 共 439 项通过，9 项 live E2E 默认跳过。其中新增 16 项历史投影、身份、筛选、游标补拉与重连验证；en、ko、ja、zh 的键与占位符检查通过。
+- 合并上游 v0.2.16 后，`npm test` 共 457 项通过，9 项 live E2E 默认跳过。其中包括 16 项历史投影、身份、筛选、游标补拉与重连验证，以及上游活动筛选测试和混合 v1/v2 团队的 Dashboard 兼容回归；en、ko、ja、zh 的键与占位符检查通过。
 - 本地目录安装后，`paseo-agent-team` 显示 `running`。实际 daemon 的 `research.read` RPC 能读取当前 Project 和 Workspace，返回空错误列表。
 - `tests/research-live.e2e.test.ts` 通过：创建临时 Project 和 Workspace，按下表保留已配置的 Profile 参数；重复 Apply 复用三个成员会话；原生消息完成 Anchor → Programmer → Mathematician → Programmer → Anchor，求和结果为 55。Programmer 主动整理 Conclusion、Evidence、Impact、Decision needed 后上报；三位成员各自的 prompt 标记均出现，未使用自动完成回调，也未由测试程序代转消息。
 - 单独重置 Programmer 后，Anchor 和 Mathematician 的会话 ID 保持不变。测试结束取消临时成员并归档测试 Workspace，证据写入临时 Project 的 `smoke-report.json`；用户的开发团队配置未改写。
 - Paseo 桌面界面已用此前的归档测试会话验证团队时间线：显示 24 条记录，成员消息筛选为 4 条，Programmer → Anchor 筛选为 1 条整理后的报告；展开原文、指定起始时间排除记录、清除筛选及跳转发送者原生会话均通过。只临时恢复测试 Workspace，成员仍保持归档，没有发送模型任务；结束后 Workspace 已重新归档，界面回到开发会话。
-- 完整配置表单、关系图当前会话连线数量的点击、运行中介入，以及 Claude/Pi 的同类实测仍待验证。此次历史视图修改没有重跑模型通信测试；沿用此前已通过的通信记录进行只读检查。
+- 合并上游后的桌面检查已确认“全部智能体”页签和活动筛选正常，三位研究成员均显示为实际会话，没有重复的旧版等待卡片。研究 Dashboard 仍显示三个成员、四条通信边及 24 条历史；点击 Programmer → Anchor 连线数量后，时间线筛选为一条报告。v2 配置成员的等待状态继续由研究关系图显示，通用 Dashboard 的等待 Role 名单仅用于 v1 团队。
+- 完整配置表单、运行中介入，以及 Claude/Pi 的同类实测仍待验证。此次历史视图修改和上游合并没有重跑模型通信测试；沿用此前已通过的通信记录进行只读检查。
 
 用户反馈需要直接查看联调历史后，已恢复最后一次成功测试的 Workspace `Research smoke ffd98b97` 及三位成员的原始测试会话，保留原会话 ID，并重新同步成员目录；三位成员均为 idle，供用户验收。联调脚本改为默认停止测试活动并保留 Workspace 和会话，只有 `PASEO_RESEARCH_ARCHIVE=1` 才在结束时归档。单成员重置仍会按设计归档旧 Programmer 会话，其历史可从团队时间线查看。
 

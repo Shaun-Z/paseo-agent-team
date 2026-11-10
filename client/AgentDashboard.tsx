@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { z } from "zod";
 import { withAlpha } from "../shared/color";
-import { buildAgentForest, canArchive, canDismiss, dismissibleIds, titleParts, type AgentNode } from "../shared/agent-tree";
+import { buildAgentForest, canArchive, canDismiss, dismissibleIds, filterForest, type ActivityFilter, type AgentForest, titleParts, type AgentNode } from "../shared/agent-tree";
 import {
   DASHBOARD_DENSITIES,
   DEFAULT_DENSITY,
@@ -42,7 +42,9 @@ const stateSchema = z.object({
   dismissed: z.array(z.string()).catch([]),
   density: z.enum(DASHBOARD_DENSITIES).catch(DEFAULT_DENSITY),
 });
-const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY };
+export const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY };
+
+export type DashboardState = z.infer<typeof stateSchema>;
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
 type TreeProps = {
@@ -167,20 +169,20 @@ function Badge({
         height: badgeSize,
         borderRadius: Math.ceil(badgeSize / 2),
         backgroundColor:
-          node.badge === "attention" ? RED : colors.statusSuccess,
+          node.badge === "attention" ? RED : node.badge === "question" ? colors.statusWarning : colors.statusSuccess,
         alignItems: "center",
         justifyContent: "center",
       }}
     >
       <Text
         style={{
-          color: colors.accentForeground,
+          color: node.badge === "question" ? colors.surface0 : colors.accentForeground,
           fontSize: badgeFontSize,
           fontWeight: "800",
           lineHeight: badgeLineHeight,
         }}
       >
-        {node.badge === "attention" ? "!" : "✓"}
+        {node.badge === "attention" ? "!" : node.badge === "question" ? "?" : "✓"}
       </Text>
     </View>
   );
@@ -1179,11 +1181,10 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
   if (query.data?.team) return <ScrollView><ResearchGraph {...props} data={query.data} /></ScrollView>;
   return <LegacyAgentDashboard {...props} />;
 }
-function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
+/** Shared dashboard data: queries, subscriptions, animations and the archive mutation. Use once per screen or panel. */
+export function useDashboardData(showClosed: boolean) {
   const paseo = usePaseo();
   const client = useQueryClient();
-  const { t } = useTranslation(messages);
-  const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
   const archived = useMutation({
     mutationFn: (id: string) => paseo.agents.ref(id).archive(),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["dashboard", "agents"] }),
@@ -1305,20 +1306,15 @@ function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
     };
   }, [paseo, client]);
   const agents = useQuery({
-    queryKey: ["dashboard", "agents", state.showClosed],
+    queryKey: ["dashboard", "agents", showClosed],
     queryFn: () =>
       paseo.agents.list(
-        state.showClosed ? { filter: { includeArchived: true } } : {},
+        showClosed ? { filter: { includeArchived: true } } : {},
       ),
   });
   const workspaces = useQuery({
     queryKey: ["dashboard", "workspaces"],
     queryFn: () => paseo.workspaces.list(),
-  });
-  const readRoster = useRpc(teamRosterRpc);
-  const roster = useQuery({
-    queryKey: ["dashboard", "roster", props.workspaceId],
-    queryFn: () => readRoster({ workspaceId: props.workspaceId }),
   });
   const providers = useQuery({
     queryKey: ["dashboard", "providers"],
@@ -1336,57 +1332,6 @@ function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
     }
     return defaults;
   }, [providers.data]);
-  const workspaceIds = useMemo(() => {
-    const entries = workspaces.data?.entries ?? [];
-    const projectId = entries.find(
-      (w) => w.id === props.workspaceId,
-    )?.projectId;
-    return projectId
-      ? entries.filter((w) => w.projectId === projectId).map((w) => w.id)
-      : [];
-  }, [workspaces.data, props.workspaceId]);
-  const unarchivedIds = useMemo(() => {
-    const scope = new Set(workspaceIds);
-    return (agents.data?.entries ?? [])
-      .map((entry) => entry.agent)
-      .filter((agent) => scope.has(agent.workspaceId ?? "") && !agent.archivedAt)
-      .map((agent) => agent.id);
-  }, [agents.data, workspaceIds]);
-  const subagents = useQuery({
-    queryKey: ["dashboard", "subagents", unarchivedIds],
-    queryFn: async () => {
-      const results = await Promise.allSettled(
-        unarchivedIds.map(async (id) => {
-          const page = await paseo.agents
-            .ref(id)
-            .timeline.refetch({ direction: "tail", limit: 200 });
-          return subagentsFromTimeline(id, page.entries);
-        }),
-      );
-      return results.flatMap((result) =>
-        result.status === "fulfilled" ? result.value : [],
-      );
-    },
-  });
-  const forest = useMemo(() => {
-    const parentAgents =
-      agents.data?.entries.map((entry) => entry.agent) ?? [];
-    const merged = mergeSubagents(subagents.data ?? [], live);
-    return buildAgentForest(
-      [...parentAgents, ...subagentAgents(merged, parentAgents)],
-      workspaceIds,
-      { ...state, defaultEfforts, roster: roster.data?.teams },
-    );
-  }, [
-    agents.data,
-    subagents.data,
-    live,
-    workspaceIds,
-    state,
-    defaultEfforts,
-    roster.data,
-  ]);
-  const closedIds = dismissibleIds(forest);
   const icons = useMemo(
     () =>
       new Map(
@@ -1394,152 +1339,67 @@ function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
       ),
     [providers.data],
   );
-  const colors = props.theme.colors;
-  const pad = props.layout.compact ? 16 : 24;
-  const [panelWidth, setPanelWidth] = useState(0);
-  const [expandedSubagents, setExpandedSubagents] = useState<
-    Record<string, boolean>
-  >({});
-  const toggleSubagents = (id: string) =>
-    setExpandedSubagents((current) => ({ ...current, [id]: !current[id] }));
-  const layout = useMemo(() => densityLayout(state.density), [state.density]);
-  const widestTree = useMemo(
-    () =>
-      forest.trees.reduce(
-        (max, node) =>
-          Math.max(
-            max,
-            expandedTreeWidth(
-              node,
-              props.layout.compact,
-              layout,
-              expandedSubagents,
-            ),
-          ),
-        0,
-      ),
-    [forest.trees, props.layout.compact, layout, expandedSubagents],
-  );
-  const collapseRoot =
-    panelWidth > 0 && widestTree > panelWidth - (pad + TREE_PAD_X) * 2;
-  const treeProps = {
-    colors,
-    compact: props.layout.compact,
-    layout,
-    icons,
-    flow,
-    glow,
-    packet,
-    open: props.navigation
-      ? (id: string) => props.navigation?.openAgent({ agentId: id })
-      : undefined,
-    caption: (node: AgentNode) =>
-      node.role ||
-      (node.kind === "orchestrator"
-        ? t("orchestrator")
-        : node.kind === "planner"
-          ? t("planner")
-          : node.kind === "subagent"
-            ? node.agent.subagentType
-              ? `${t("subagent")} · ${node.agent.subagentType}`
-              : t("subagent")
-            : node.agent.provider),
-    waitingLabel: t("waiting"),
-    hideLabel: t("hideAgent"),
-    archive: {
-      label: t("archiveAgent"),
-      errorLabel: t("archiveFailed"),
-      pending: archived.isPending,
-      errorId: archived.isError ? archived.variables ?? null : null,
-      run: (id: string) => archived.mutate(id),
-    },
-    dismiss: state.showClosed ? (id: string) => setState({ ...state, dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed, id] }) : undefined,
-    subagentLabel: (count: number) => t("subagentCount", { count }),
-    expandedSubagents,
-    toggleSubagents,
-  };
+  return { paseo, agents, workspaces, archived, live, flow, glow, packet, defaultEfforts, icons };
+}
+
+export type DashboardData = ReturnType<typeof useDashboardData>;
+
+/** The density toggle shared by the workspace panel and the Agent teams screen. */
+export function DensityToggle({ colors, state, setState }: { colors: Colors; state: DashboardState; setState: (next: DashboardState) => void }) {
+  const { t } = useTranslation(messages);
   return (
-    <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
-      <AnimationAnchor value={flow} />
-      <AnimationAnchor value={glow} />
-      <AnimationAnchor value={packet} />
-      <View
-        style={{
-          paddingHorizontal: props.layout.compact ? 16 : 24,
-          paddingVertical: 16,
-          borderBottomWidth: 1,
-          borderColor: colors.border,
-          flexDirection: "row",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <Text
-          style={{ color: colors.foreground, fontSize: 18, fontWeight: "700" }}
-        >
-          {t("dashboardTitle")}
-        </Text>
-        <View
-          style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            flexShrink: 1,
-            marginLeft: "auto",
-            maxWidth: "100%",
-            gap: 12,
-          }}
-        >
-          <View
-            accessibilityLabel={t("density.label")}
+    <View
+      accessibilityLabel={t("density.label")}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: colors.surface1,
+        borderRadius: 7,
+        borderWidth: 1,
+        borderColor: colors.border,
+        padding: 2,
+        gap: 2,
+      }}
+    >
+      {DASHBOARD_DENSITIES.map((option) => {
+        const selected = state.density === option;
+        const label = t(`density.${option}`);
+        return (
+          <Pressable
+            key={option}
+            accessibilityRole="button"
+            accessibilityLabel={`${t("density.label")}: ${label}`}
+            accessibilityState={{ selected }}
+            onPress={() => setState({ ...state, density: option })}
             style={{
-              flexDirection: "row",
-              alignItems: "center",
-              backgroundColor: colors.surface1,
-              borderRadius: 7,
-              borderWidth: 1,
-              borderColor: colors.border,
-              padding: 2,
-              gap: 2,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 5,
+              backgroundColor: selected ? colors.accent : "transparent",
             }}
           >
-            {DASHBOARD_DENSITIES.map((option) => {
-              const selected = state.density === option;
-              const label = t(`density.${option}`);
-              return (
-                <Pressable
-                  key={option}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${t("density.label")}: ${label}`}
-                  accessibilityState={{ selected }}
-                  onPress={() => setState({ ...state, density: option })}
-                  style={{
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    borderRadius: 5,
-                    backgroundColor: selected ? colors.accent : "transparent",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: selected
-                        ? colors.accentForeground
-                        : colors.foregroundMuted,
-                      fontSize: 11,
-                      fontWeight: selected ? "700" : "500",
-                    }}
-                  >
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      </View>
+            <Text
+              style={{
+                color: selected
+                  ? colors.accentForeground
+                  : colors.foregroundMuted,
+                fontSize: 11,
+                fontWeight: selected ? "700" : "500",
+              }}
+            >
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** The Show closed switch with Hide closed / Restore hidden, shared by the workspace panel and the Agent teams screen. */
+export function ClosedControls({ colors, state, setState, closedIds, pad }: { colors: Colors; state: DashboardState; setState: (next: DashboardState) => void; closedIds: string[]; pad: number }) {
+  const { t } = useTranslation(messages);
+  return (
       <View
         style={{
           flexDirection: "row",
@@ -1600,19 +1460,152 @@ function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
             </Pressable>
           ) : null}
       </View>
-      <ScrollView
-        horizontal
-        style={{ flex: 1 }}
-        contentContainerStyle={{ flexGrow: 1 }}
-        onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)}
-      >
-        <ScrollView
-          style={{ flexGrow: 1, flexShrink: 0 }}
-          contentContainerStyle={{
-            padding: pad,
-            gap: 24,
-          }}
-        >
+  );
+}
+
+/** The agent trees of the given workspaces. `embedded` drops the inner vertical scroller so it can sit inside another scroll view. */
+export function AgentDashboardView(props: {
+  data: DashboardData;
+  workspaceIds: string[];
+  rosterWorkspaceId: string | null;
+  state: DashboardState;
+  setState: (next: DashboardState) => void;
+  colors: Colors;
+  compact: boolean;
+  open?: (id: string) => void;
+  embedded?: boolean;
+  /** Called with the dismissible session ids whenever they change. */
+  reportClosed?: (ids: string[]) => void;
+  /** Only trees with an agent of this activity are shown; the unfiltered forest is reported through reportForest. */
+  activityFilter?: ActivityFilter;
+  reportForest?: (forest: AgentForest) => void;
+}) {
+  const { data, workspaceIds, state, setState, colors } = props;
+  const { paseo, agents, workspaces, archived, live, flow, glow, packet, defaultEfforts, icons } = data;
+  const { t } = useTranslation(messages);
+  const readRoster = useRpc(teamRosterRpc);
+  const roster = useQuery({
+    queryKey: ["dashboard", "roster", props.rosterWorkspaceId],
+    queryFn: () => readRoster({ workspaceId: props.rosterWorkspaceId! }),
+    enabled: props.rosterWorkspaceId !== null,
+  });
+  const unarchivedIds = useMemo(() => {
+    const scope = new Set(workspaceIds);
+    return (agents.data?.entries ?? [])
+      .map((entry) => entry.agent)
+      .filter((agent) => scope.has(agent.workspaceId ?? "") && !agent.archivedAt)
+      .map((agent) => agent.id);
+  }, [agents.data, workspaceIds]);
+  const subagents = useQuery({
+    queryKey: ["dashboard", "subagents", unarchivedIds],
+    queryFn: async () => {
+      const results = await Promise.allSettled(
+        unarchivedIds.map(async (id) => {
+          const page = await paseo.agents
+            .ref(id)
+            .timeline.refetch({ direction: "tail", limit: 200 });
+          return subagentsFromTimeline(id, page.entries);
+        }),
+      );
+      return results.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : [],
+      );
+    },
+  });
+  const fullForest = useMemo(() => {
+    const parentAgents =
+      agents.data?.entries.map((entry) => entry.agent) ?? [];
+    const merged = mergeSubagents(subagents.data ?? [], live);
+    return buildAgentForest(
+      [...parentAgents, ...subagentAgents(merged, parentAgents)],
+      workspaceIds,
+      { ...state, defaultEfforts, roster: roster.data?.teams },
+    );
+  }, [
+    agents.data,
+    subagents.data,
+    live,
+    workspaceIds,
+    state,
+    defaultEfforts,
+    roster.data,
+  ]);
+  const { reportForest, activityFilter = "all" } = props;
+  useEffect(() => {
+    reportForest?.(fullForest);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullForest]);
+  const forest = useMemo(() => filterForest(fullForest, activityFilter), [fullForest, activityFilter]);
+  const closedIds = dismissibleIds(fullForest);
+  const closedKey = closedIds.join("\n");
+  const { reportClosed } = props;
+  useEffect(() => {
+    reportClosed?.(closedIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closedKey]);
+  const pad = props.compact || props.embedded ? 16 : 24;
+  const [panelWidth, setPanelWidth] = useState(0);
+  const [expandedSubagents, setExpandedSubagents] = useState<
+    Record<string, boolean>
+  >({});
+  const toggleSubagents = (id: string) =>
+    setExpandedSubagents((current) => ({ ...current, [id]: !current[id] }));
+  const layout = useMemo(() => densityLayout(state.density), [state.density]);
+  const widestTree = useMemo(
+    () =>
+      forest.trees.reduce(
+        (max, node) =>
+          Math.max(
+            max,
+            expandedTreeWidth(
+              node,
+              props.compact,
+              layout,
+              expandedSubagents,
+            ),
+          ),
+        0,
+      ),
+    [forest.trees, props.compact, layout, expandedSubagents],
+  );
+  const collapseRoot =
+    panelWidth > 0 && widestTree > panelWidth - (pad + TREE_PAD_X) * 2;
+  const treeProps = {
+    colors,
+    compact: props.compact,
+    layout,
+    icons,
+    flow,
+    glow,
+    packet,
+    open: props.open,
+    caption: (node: AgentNode) =>
+      node.role ||
+      (node.kind === "orchestrator"
+        ? t("orchestrator")
+        : node.kind === "planner"
+          ? t("planner")
+          : node.kind === "subagent"
+            ? node.agent.subagentType
+              ? `${t("subagent")} · ${node.agent.subagentType}`
+              : t("subagent")
+            : node.agent.provider),
+    waitingLabel: t("waiting"),
+    hideLabel: t("hideAgent"),
+    archive: {
+      label: t("archiveAgent"),
+      errorLabel: t("archiveFailed"),
+      pending: archived.isPending,
+      errorId: archived.isError ? archived.variables ?? null : null,
+      run: (id: string) => archived.mutate(id),
+    },
+    dismiss: state.showClosed ? (id: string) => setState({ ...state, dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed, id] }) : undefined,
+    subagentLabel: (count: number) => t("subagentCount", { count }),
+    expandedSubagents,
+    toggleSubagents,
+  };
+  const content = (
+    <>
           {agents.isLoading || workspaces.isLoading ? (
             <Loading />
           ) : agents.error || workspaces.error ? (
@@ -1625,24 +1618,26 @@ function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
             </Text>
           ) : (
             <>
-              <View
-                style={{
-                  paddingHorizontal: TREE_PAD_X,
-                  paddingVertical: 12,
-                  gap: 26,
-                  alignItems: "flex-start",
-                }}
-              >
-                {forest.trees.map((node) => (
-                  <Tree
-                    key={node.agent.id}
-                    {...treeProps}
-                    node={node}
-                    root
-                    collapseRoot={collapseRoot}
-                  />
-                ))}
-              </View>
+              {forest.trees.length > 0 && (
+                <View
+                  style={{
+                    paddingHorizontal: TREE_PAD_X,
+                    paddingVertical: 12,
+                    gap: 26,
+                    alignItems: "flex-start",
+                  }}
+                >
+                  {forest.trees.map((node) => (
+                    <Tree
+                      key={node.agent.id}
+                      {...treeProps}
+                      node={node}
+                      root
+                      collapseRoot={collapseRoot}
+                    />
+                  ))}
+                </View>
+              )}
               {forest.solo.length > 0 && (
                 <View
                   style={{
@@ -1675,8 +1670,100 @@ function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
               )}
             </>
           )}
-        </ScrollView>
+    </>
+  );
+  return (
+    <>
+      <AnimationAnchor value={flow} />
+      <AnimationAnchor value={glow} />
+      <AnimationAnchor value={packet} />
+      <ScrollView
+        horizontal
+        style={props.embedded ? undefined : { flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1 }}
+        onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)}
+      >
+        {props.embedded ? (
+          <View style={{ flexGrow: 1, flexShrink: 0, padding: pad, gap: 16 }}>{content}</View>
+        ) : (
+          <ScrollView
+            style={{ flexGrow: 1, flexShrink: 0 }}
+            contentContainerStyle={{
+              padding: pad,
+              gap: 24,
+            }}
+          >
+            {content}
+          </ScrollView>
+        )}
       </ScrollView>
+    </>
+  );
+}
+
+function LegacyAgentDashboard(props: PluginWorkspacePanelProps) {
+  const { t } = useTranslation(messages);
+  const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
+  const data = useDashboardData(state.showClosed);
+  const colors = props.theme.colors;
+  const pad = props.layout.compact ? 16 : 24;
+  const workspaceIds = useMemo(() => {
+    const entries = data.workspaces.data?.entries ?? [];
+    const projectId = entries.find(
+      (w) => w.id === props.workspaceId,
+    )?.projectId;
+    return projectId
+      ? entries.filter((w) => w.projectId === projectId).map((w) => w.id)
+      : [];
+  }, [data.workspaces.data, props.workspaceId]);
+  const [closedIds, setClosedIds] = useState<string[]>([]);
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
+      <View
+        style={{
+          paddingHorizontal: props.layout.compact ? 16 : 24,
+          paddingVertical: 16,
+          borderBottomWidth: 1,
+          borderColor: colors.border,
+          flexDirection: "row",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <Text
+          style={{ color: colors.foreground, fontSize: 18, fontWeight: "700" }}
+        >
+          {t("dashboardTitle")}
+        </Text>
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            flexShrink: 1,
+            marginLeft: "auto",
+            maxWidth: "100%",
+            gap: 12,
+          }}
+        >
+          <DensityToggle colors={colors} state={state} setState={setState} />
+        </View>
+      </View>
+      <ClosedControls colors={colors} state={state} setState={setState} closedIds={closedIds} pad={pad} />
+      <AgentDashboardView
+        data={data}
+        workspaceIds={workspaceIds}
+        rosterWorkspaceId={props.workspaceId}
+        state={state}
+        setState={setState}
+        colors={colors}
+        compact={props.layout.compact}
+        open={props.navigation ? (id: string) => props.navigation?.openAgent({ agentId: id }) : undefined}
+        reportClosed={setClosedIds}
+      />
     </View>
   );
 }
