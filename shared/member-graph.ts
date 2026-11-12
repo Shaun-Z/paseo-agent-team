@@ -10,6 +10,13 @@ export type GraphConnection = MessageEdge & {
 };
 const margin = 24, rowGap = 128, trackGap = 48, portGap = 12, labelHeight = 28;
 
+/** The wrapper reserves scaled bounds; offsets compensate for center-origin transforms. */
+export function fitMemberGraph(graph: { width: number; height: number }, viewportWidth: number) {
+  const scale = viewportWidth > 0 && graph.width > 0 ? Math.min(1, viewportWidth / graph.width) : 0;
+  const width = graph.width * scale, height = graph.height * scale;
+  return { scale, width, height, left: (width - graph.width) / 2, top: (height - graph.height) / 2 };
+}
+
 /** Layout is keyed by member identity, independent of role multiplicity and session IDs. */
 export function memberGraph(ids: readonly string[], coordinatorId: string) {
   const width = MEMBER_CARD_WIDTH, height = MEMBER_CARD_HEIGHT, gap = 112;

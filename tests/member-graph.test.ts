@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memberCommunicationGraph } from "../shared/member-graph";
+import { fitMemberGraph, memberCommunicationGraph } from "../shared/member-graph";
 
 type Point = { x: number; y: number };
 type Rect = Point & { width: number; height: number };
@@ -92,5 +92,36 @@ describe("directed member graph", () => {
     const graph = memberCommunicationGraph(ids, ids[0]!, messages);
     expect(graph.connections).toHaveLength(count * (count - 1));
     assertClear(graph);
+  });
+});
+
+describe("graph fit to the available viewport", () => {
+  const graph = memberCommunicationGraph(["anchor", "programmer", "mathematician", "clarifier"], "anchor", example);
+  it.each([320, 640, 784, 1080])("keeps all four members and message counts inside a %ipx column", viewportWidth => {
+    const fit = fitMemberGraph(graph, viewportWidth);
+    expect(fit.width).toBeLessThanOrEqual(viewportWidth);
+    expect(fit.scale).toBeGreaterThan(0); expect(fit.scale).toBeLessThanOrEqual(1);
+    expect(fit.height / fit.width).toBeCloseTo(graph.height / graph.width);
+    // Apply the same center-origin transform as the native canvas.
+    const transform = (x: number, y: number) => ({ x: fit.left + graph.width / 2 + (x - graph.width / 2) * fit.scale,
+      y: fit.top + graph.height / 2 + (y - graph.height / 2) * fit.scale });
+    for (const rect of [...graph.nodes.values(), ...graph.connections.flatMap(edge => edge.label ? [edge.label] : [])]) {
+      const start = transform(rect.x, rect.y), end = transform(rect.x + rect.width, rect.y + rect.height);
+      expect(start.x).toBeGreaterThanOrEqual(0); expect(start.y).toBeGreaterThanOrEqual(0);
+      expect(end.x).toBeLessThanOrEqual(fit.width); expect(end.y).toBeLessThanOrEqual(fit.height);
+    }
+  });
+  it("recomputes scale on resize and when communication lanes widen the graph", () => {
+    const narrow = fitMemberGraph(graph, 640), wider = fitMemberGraph(graph, 800);
+    expect(wider.scale).toBeGreaterThan(narrow.scale);
+    const ids = ["anchor", "programmer", "mathematician", "clarifier", "reviewer"];
+    const expanded = memberCommunicationGraph(ids, "anchor", ids.flatMap(from => ids.filter(to => to !== from).map(to => ({ from, to, count: 100 }))));
+    const fit = fitMemberGraph(expanded, 640);
+    expect(fit.width).toBeCloseTo(640);
+    expect(fit.scale).toBeLessThan(narrow.scale);
+  });
+  it("does not enlarge small graphs or expose unscaled content before measurement", () => {
+    expect(fitMemberGraph(graph, graph.width + 500)).toEqual({ scale: 1, width: graph.width, height: graph.height, left: 0, top: 0 });
+    expect(fitMemberGraph(graph, 0)).toMatchObject({ scale: 0, width: 0, height: 0 });
   });
 });

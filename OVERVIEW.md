@@ -26,6 +26,8 @@ The two panels link to each other in the same Workspace. The sidebar's **Agent t
 
 Member summaries and the editor compare saved launch parameters with Current session settings. Model, explicit mode and thinking-selection changes receive a separate difference indicator. Dashboard cards display the current model and effective thinking level, refreshed through agent updates and polling. Unreported values remain unknown; default/automatic effort resolution alone is not marked as a manual change. Displaying differences does not overwrite settings: Apply retains the session and reset uses saved launch parameters.
 
+The relationship graph scales down uniformly to its measured available width. Cards, paths, arrowheads and count badges keep their relative positions and interaction targets. Its container reserves the scaled height, recalculates on resize or graph changes, and stays separate from Recent messages. Graphs that fit are not enlarged.
+
 ## Team definitions and changes
 
 A Project can have multiple teams, each owning one Workspace. A team definition lives in `.agents/teams/<workspace>.json`; the same format may be stored in `.agents/team.json`. Definitions use version 2, separate Roles from members and store Profile launch snapshots. Files are intended to be shared through git. Host-local Profile bindings and live session IDs are kept in `.agents/.runtime/paseo-agent-team/`, excluded through the Project's `.gitignore` on Apply.

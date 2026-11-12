@@ -47,6 +47,8 @@ The sidebar's **Agent teams** screen keeps the project card layout and lists all
 
 Member summaries and the member editor show **Current session** settings alongside the saved launch parameters. Model, explicit mode or thinking-selection changes are marked **Differs from saved settings**, separately from pending prompt/config updates. Dashboard cards use the current session's model and effective thinking level, refreshed through agent updates and polling. Unreported values remain unknown. Provider defaults and automatic thinking resolution do not by themselves indicate a manual change. Displaying differences does not change settings: Apply reuses the session and reset uses saved launch parameters.
 
+The relationship graph automatically scales down as a whole to fit its available column, including cards, lines, arrows and count badges. It preserves aspect ratio, reserves only the scaled height and recalculates on panel resize or graph changes. Recent messages keep their own column; the graph no longer extends behind them. Graphs that already fit remain at their original size.
+
 ## Change a team
 
 Reapplying reuses member sessions by team and member identity. Changed prompts or launch settings are marked pending. **Reset member session** explicitly archives that member's session and creates a fresh one using the saved configuration; other members keep their sessions. Removing a member and applying archives its session.

@@ -1,4 +1,4 @@
-import { MEMBER_CARD_HEIGHT, MEMBER_CARD_WIDTH, memberCommunicationGraph } from "../shared/member-graph";
+import { fitMemberGraph, MEMBER_CARD_HEIGHT, MEMBER_CARD_WIDTH, memberCommunicationGraph } from "../shared/member-graph";
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
@@ -52,6 +52,7 @@ export function ResearchGraph({ data, theme, navigation, openConfiguration }: Su
   const c = theme.colors;
   const [tab, setTab] = useState<"overview" | "timeline">("overview");
   const [contentWidth, setContentWidth] = useState(0);
+  const [graphViewportWidth, setGraphViewportWidth] = useState(0);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>({ kind: "message" });
   const activeIds = new Set(data.members.flatMap(member => member.agentId ? [member.agentId] : []));
   const sources = [...new Set([...Object.keys(data.identities), ...activeIds])].sort().map(agentId => ({ agentId, live: activeIds.has(agentId) }));
@@ -67,6 +68,7 @@ export function ResearchGraph({ data, theme, navigation, openConfiguration }: Su
   const memberName = (id: string) => team.members.find(member => member.id === id)?.name ?? id;
   const lead = team.members.find(member => member.id === team.orchestratorMemberId)!;
   const graph = memberCommunicationGraph(team.members.map(member => member.id), lead.id, edges);
+  const fittedGraph = fitMemberGraph(graph, graphViewportWidth);
   const leadState = data.members.find(member => member.id === lead.id);
   const working = data.members.filter(member => member.status === "running" || member.status === "initializing").length;
   const attention = data.members.filter(member => member.status === "attention" || member.status === "error" || member.error).length;
@@ -113,20 +115,22 @@ export function ResearchGraph({ data, theme, navigation, openConfiguration }: Su
     </View>
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
     {data.errors.map(message => <Text key={message} style={{ color: c.statusDanger }}>{message}</Text>)}
-    {tab === "overview" ? <View onLayout={event => setContentWidth(Math.round(event.nativeEvent.layout.width))} style={{ flexDirection: wide ? "row" : "column", gap: 16, alignItems: "flex-start" }}>
-    <View style={{ flex: wide ? 1 : undefined, width: wide ? undefined : "100%", minWidth: 0, gap: 8 }}>
+    {tab === "overview" ? <View onLayout={event => setContentWidth(Math.round(event.nativeEvent.layout.width))} style={{ width: "100%", minWidth: 0, flexDirection: wide ? "row" : "column", gap: 16, alignItems: "flex-start" }}>
+    <View style={{ flex: wide ? 1 : undefined, width: wide ? undefined : "100%", minWidth: 0, maxWidth: "100%", overflow: "hidden", gap: 8 }}>
     <Text style={{ color: c.foreground, fontWeight: "600", fontSize: 14 }}>{t("research.graph")}</Text>
-    <ScrollView horizontal>
-      <View style={{ width: graph.width, height: graph.height, backgroundColor: c.surface0 }}>
+    <View onLayout={event => setGraphViewportWidth(Math.floor(event.nativeEvent.layout.width))} style={{ width: "100%", minWidth: 0, overflow: "hidden" }}>
+      <View style={{ width: fittedGraph.width, height: fittedGraph.height, alignSelf: "center" }}>
+      <View style={{ position: "absolute", left: fittedGraph.left, top: fittedGraph.top, width: graph.width, height: graph.height, backgroundColor: c.surface0, transform: [{ scale: fittedGraph.scale }] }}>
         <MemberConnectionPaths connections={graph.connections} colors={c} selected={edge => selectedEdge(edge.from, edge.to)} focused={focused} />
         {team.members.map(member => { const pos = graph.nodes.get(member.id)!; return <View key={member.id} style={{ position: "absolute", left: pos.x, top: pos.y }}>{node(member)}</View>; })}
         <MemberConnectionCounts connections={graph.connections} colors={c} selected={edge => selectedEdge(edge.from, edge.to)} focused={focused}
           onSelect={edge => selectEdge(edge.from, edge.to)} label={edge => `${t("research.history.filterDirection", { from: memberName(edge.from), to: memberName(edge.to) })} (${edge.count})`} />
       </View>
-    </ScrollView>
+      </View>
+    </View>
     <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{t("research.ui.graphHint")}</Text>
     </View>
-    <View style={{ width: wide ? 340 : "100%", borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 12, gap: 10, backgroundColor: c.surface1 }}>
+    <View style={{ width: wide ? 340 : "100%", flexShrink: 0, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 12, gap: 10, backgroundColor: c.surface1 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text style={{ color: c.foreground, fontWeight: "600", flex: 1 }}>{t("research.ui.recent")}</Text><Pressable accessibilityRole="button" onPress={() => { setHistoryFilter({ kind: "message" }); setTab("timeline"); }}><Text style={{ color: c.accent, fontSize: 12 }}>{t("research.ui.viewHistory")}</Text></Pressable></View>
       {recent.map(event => <Pressable key={event.id} accessibilityRole="button" onPress={() => selectEdge(event.from, event.to!)} style={{ paddingVertical: 8, gap: 5, borderBottomWidth: 1, borderColor: c.border }}>
         <View style={{ flexDirection: "row", gap: 8 }}><Text numberOfLines={1} style={{ color: c.accent, fontSize: 12, flex: 1 }}>{memberName(event.from)} → {memberName(event.to!)}</Text><Text style={{ color: c.foregroundMuted, fontSize: 10 }}>{event.timestamp === null ? "" : new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text></View>
