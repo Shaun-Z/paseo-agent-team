@@ -18,9 +18,13 @@ The **Agent team** panel shows configuration. **Members** lists saved launch par
 
 The **Agent dashboard** panel shows activity for that Workspace's team. Overview contains member status, a directed relationship graph and up to five recent messages. Wide panels place the graph and messages side by side. Members with the same Role remain separate nodes. Nodes open native conversations; message counts open the corresponding exchange. Configured members without a session remain visible. Workspaces without a configured team show a configuration entry.
 
+Opposite message directions have separate paths and count badges. Filled arrowheads remain outside cards. Count badges include direction arrows, avoid cards and each other, and render above lines. Selecting a badge opens that direction in Timeline. Pairs without observed communication use a single structural link.
+
 Timeline combines current and archived sessions of configured members. It defaults to member messages, newest first; All activity adds user instructions, local replies, tools and events. Search stays visible while participant, activity and time filters expand on demand. Expanded records expose full text, tool details and native conversation links. Matching records are displayed 20 at a time. Timeline is a read-only user view and does not send history into the Orchestrator's conversation.
 
 The two panels link to each other in the same Workspace. The sidebar's **Agent teams** screen retains compact project cards and team actions. **All agents** shows native session trees across projects with activity filters, density controls and closed-session controls.
+
+Member summaries and the editor compare saved launch parameters with Current session settings. Model, explicit mode and thinking-selection changes receive a separate difference indicator. Dashboard cards display the current model and effective thinking level, refreshed through agent updates and polling. Unreported values remain unknown; default/automatic effort resolution alone is not marked as a manual change. Displaying differences does not overwrite settings: Apply retains the session and reset uses saved launch parameters.
 
 ## Team definitions and changes
 
@@ -48,6 +52,7 @@ The plugin reads Project, Workspace, provider, Profile and agent metadata; local
 ## Limitations
 
 - Reporting and collaboration rules are prompt instructions. Provider behavior determines tool availability, interruptions and user steering.
+- Session parameters are the values reported by Paseo. Harness updates may arrive after a change takes effect. Changes in native conversations are not automatically saved as launch defaults.
 - The built-in Antigravity adapter cannot inject Paseo tools. The separate `antigravity-cli` adapter supports opt-in tool sharing through ACP. Pi depends on its installed integration.
 - Native communication has been verified with an Antigravity CLI coordinator and two Codex members using saved Profiles. Other provider combinations, active interruption and restart recovery need live validation.
 - Approval reviewers may require a user-authorized task scope in a member's conversation. The plugin does not grant that authorization or substitute permission settings.

@@ -1,9 +1,11 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { AgentProfileSchema, ResearchTeamSchema } from "./research-team";
+import { SessionSettingsSchema } from "./member-settings";
 const target = z.union([z.object({ workspaceId: z.string() }), z.object({ projectId: z.string() })]);
 export const MemberStateSchema = z.object({
   id: z.string(), agentId: z.string().nullable(), status: z.string(), pending: z.boolean(), error: z.string().nullable(),
+  sessionSettings: SessionSettingsSchema.nullable(), settingsChanged: z.boolean(),
 });
 export const researchReadRpc = defineRpc({ name: "research.read", input: target, output: z.object({
   project: z.object({ id: z.string(), name: z.string(), root: z.string() }), workspace: z.string().nullable(),

@@ -17,7 +17,7 @@ async function fixture() {
   for (const name of ["common", "anchor", "programmer"]) await writeFile(join(root, `prompts/${name}.md`), `${name} standing instructions`);
   const project = { projectId: "prj", projectRootPath: root, projectDisplayName: "Research" };
   const workspace = { ...project, id: "wks", name: "research", title: "research", workspaceDirectory: root, archivingAt: null };
-  type Agent = { id: string; workspaceId: string; labels: Record<string,string>; provider: string; model: string; status: string; archivedAt: string | null; requiresAttention: boolean };
+  type Agent = { id: string; workspaceId: string; labels: Record<string,string>; provider: string; model: string | null; currentModeId?: string | null; thinkingOptionId?: string | null; effectiveThinkingOptionId?: string | null; status: string; archivedAt: string | null; requiresAttention: boolean };
   const agents: Agent[] = [];
   const configs: Record<string, unknown>[] = [];
   const archive = vi.fn(async (id: string) => { agents.find(a => a.id === id)!.archivedAt = "now"; return { archivedAt: "now" }; });
@@ -26,7 +26,12 @@ async function fixture() {
     if (options.labels[MEMBER_LABEL] === failMember) throw new Error("simulated provider failure");
     configs.push(options.config);
     const id = `agent-${agents.length + 1}`;
-    agents.push({ id, workspaceId: "wks", labels: options.labels, provider: String(options.config.provider), model: "m", status: "idle", archivedAt: null, requiresAttention: false });
+    const selected = String(options.config.provider), slash = selected.indexOf("/");
+    agents.push({ id, workspaceId: "wks", labels: options.labels, provider: selected.slice(0, slash), model: selected.slice(slash + 1),
+      currentModeId: options.config.modeId as string | undefined ?? null,
+      thinkingOptionId: options.config.thinkingOptionId as string | undefined ?? null,
+      effectiveThinkingOptionId: options.config.thinkingOptionId as string | undefined ?? null,
+      status: "idle", archivedAt: null, requiresAttention: false });
     return { id };
   });
   const profiles = [{ id: "profile", name: "Configured", provider: "test", model: "m", modeId: "ask", featureValues: { flag: false } }];
@@ -84,6 +89,36 @@ describe("research sessions", () => {
     expect(f.agents.find(a => a.id === "agent-1")!.archivedAt).toBeNull();
     expect(f.agents.find(a => a.id === "agent-3")!.archivedAt).toBeNull();
     expect(String(f.configs.at(-1)!.systemPrompt)).toContain("New programmer instructions");
+  });
+  it("reports manual session changes without rewriting saved settings or replacing the member", async () => {
+    const f = await fixture(), team = teamFixture();
+    const applied = await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
+    const savedFile = await readFile(applied.file, "utf8");
+    const member = f.agents[1]!, id = member.id;
+    member.model = "manually-selected-model";
+    member.thinkingOptionId = "low";
+    member.effectiveThinkingOptionId = "low";
+    const read = await readResearch({ workspaceId: "wks" }, f.ctx);
+    expect(read.members[1]).toMatchObject({ agentId: id, pending: false, settingsChanged: true,
+      sessionSettings: { provider: "test", model: "manually-selected-model", thinkingOptionId: "low", effectiveThinkingOptionId: "low" } });
+    expect(read.team!.members[1]!.launchSnapshot).toEqual(team.members[1]!.launchSnapshot);
+    expect(await readFile(applied.file, "utf8")).toBe(savedFile);
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
+    expect(f.create).toHaveBeenCalledTimes(3);
+    expect(member.model).toBe("manually-selected-model");
+    expect((await readResearch({ workspaceId: "wks" }, f.ctx)).members[1]!.agentId).toBe(id);
+    await resetResearchMember({ workspaceId: "wks", memberId: "coder-a" }, f.ctx);
+    const reset = (await readResearch({ workspaceId: "wks" }, f.ctx)).members[1]!;
+    expect(reset.agentId).not.toBe(id);
+    expect(reset.settingsChanged).toBe(false);
+    expect(reset.sessionSettings).toMatchObject({ model: "m", thinkingOptionId: "high" });
+  });
+  it("keeps missing-session settings separate from its saved launch parameters", async () => {
+    const f = await fixture();
+    await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
+    f.agents[1]!.archivedAt = "now";
+    const state = (await readResearch({ workspaceId: "wks" }, f.ctx)).members[1]!;
+    expect(state).toMatchObject({ agentId: null, sessionSettings: null, settingsChanged: false });
   });
   it("recovers partial creation and rejects missing prompts before creating any sessions", async () => {
     const f = await fixture(), team = teamFixture();

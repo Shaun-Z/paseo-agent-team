@@ -11,6 +11,7 @@ import type { researchApplyRpc, researchReadRpc, researchResetRpc } from "../sha
 import { catalogFrom } from "../shared/validate";
 import { projectOf, projectTeams, teamFileFor } from "./team-directory";
 import { allPages } from "./pagination";
+import { sessionSettingsDiffer, sessionSettingsOf } from "../shared/member-settings";
 
 type Api = PluginHandlerContext["paseo"];
 type Target = { workspaceId: string } | { projectId: string };
@@ -97,6 +98,7 @@ export async function readResearch(target: RpcInput<typeof researchReadRpc>, { p
       const agent = agents[0];
       const pending = !!agent && (!prompts || agent.labels[CONFIG_LABEL] !== prompts.get(member.id)?.fingerprint);
       members.push({ id: member.id, agentId: agent?.id ?? null, status: agent?.requiresAttention ? "attention" : agent?.status ?? "missing", pending,
+        sessionSettings: agent ? sessionSettingsOf(agent) : null, settingsChanged: !!agent && sessionSettingsDiffer(member.launchSnapshot, agent),
         error: agents.length > 1 ? "Multiple active sessions for this member; resolve them before applying." : null });
     }
   }

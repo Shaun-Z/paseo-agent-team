@@ -37,6 +37,7 @@ Key details:
 - Match each team to its Workspace by title. Preserve unrelated files when allocating a new definition filename.
 - Stable labels `paseo-agent-team.team`, `paseo-agent-team.member` and `paseo-agent-team.config` identify sessions and prompt/config fingerprints. The Orchestrator also carries `workspace-agents=orchestrator`.
 - Preserve user-selected provider/model/mode/effort/features. Do not choose automatic modes or replace Profiles. Changed prompt/config fingerprints are pending until explicit per-member reset.
+- Read current model/thinking from Paseo session snapshots for display. Keep saved launch parameters distinct from session changes; observing differences must not overwrite either. Default/auto thinking resolution alone is not a manual override. Dashboard refreshes through agent updates and polling.
 - Host-local Profile bindings and session IDs live in `.agents/.runtime/paseo-agent-team/<teamId>.json`, excluded from git on Apply.
 - Team management follows pagination. The generic All agents view's single-page lists remain a known limitation.
 - Daemon errors are English. Client UI strings go through `client/i18n.ts` and `shared/messages.ts`.

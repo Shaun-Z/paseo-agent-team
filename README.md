@@ -39,9 +39,13 @@ All projects use this workflow. Earlier `version: 1` definitions are ignored and
 
 **Agent dashboard** shows activity in the current Workspace's team. **Overview** contains member status, a directed relationship graph and up to five recent messages. Wide panels place the graph and messages side by side. Click a member to open its native conversation and intervene. **Open dashboard** and **Team settings** switch between the two panels. A Workspace without a team shows a configuration entry.
 
+Opposite message directions use separate paths and count badges. Filled arrowheads stop outside the cards, and each count badge includes a direction arrow. Badges are placed clear of cards and one another, above the lines, and remain clickable to open that direction in Timeline. A configured relationship is drawn once when the pair has no observed messages.
+
 The Dashboard's **Timeline** merges current and archived sessions of configured members. It defaults to member messages, newest first. **All activity** adds user instructions, local replies, tools and events. Search stays visible; participant, activity and date/time controls expand through **Filters**. Select a graph arrow's message count to view that exchange. Expand a record for full text, tool details and native conversation links. Matching records are displayed 20 at a time. History is observed for the user; it is not forwarded to the Orchestrator.
 
 The sidebar's **Agent teams** screen keeps the project card layout and lists all configured teams. **All agents** displays native sessions across projects, including activity filters and compact tree cards. Its counts describe agent trees. Configured members without sessions are shown in their team's Dashboard.
+
+Member summaries and the member editor show **Current session** settings alongside the saved launch parameters. Model, explicit mode or thinking-selection changes are marked **Differs from saved settings**, separately from pending prompt/config updates. Dashboard cards use the current session's model and effective thinking level, refreshed through agent updates and polling. Unreported values remain unknown. Provider defaults and automatic thinking resolution do not by themselves indicate a manual change. Displaying differences does not change settings: Apply reuses the session and reset uses saved launch parameters.
 
 ## Change a team
 
@@ -91,6 +95,7 @@ The UI follows Paseo's app language. English, Korean, Japanese and Simplified Ch
 - All members share one checkout. Coordinate overlapping edits. Role prompts do not enforce filesystem isolation.
 - Timeline ordering uses Paseo timestamps; restored history may have reconstructed times. Equal timestamps do not establish order across sessions. Current-session graph counts exclude callbacks and archived sessions. Removed members' history remains in Paseo archives.
 - The panel backfills configured members' histories on opening. Very long histories may take time to load. Navigation opens a conversation, since the plugin API does not expose jumping to an individual message.
+- Current-session parameters reflect Paseo's reported snapshot. A harness may report a change after it takes effect; unreported values remain unknown. Session changes are not automatically saved as future launch defaults.
 - The generic **All agents** view reads one page of workspace and agent lists. Team management follows pagination. Historical sub-agent discovery in All agents reads the latest 200 items of each unarchived agent, and historical status may lag activity.
 - Native conversation links require client navigation support. Paseo controls sidebar ordering.
 

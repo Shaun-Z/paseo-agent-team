@@ -1,7 +1,6 @@
-import { ResearchGraph } from "./ResearchTeam";
-import { researchReadRpc } from "../shared/research-rpc";
+import { ResearchGraph, useResearch } from "./ResearchTeam";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { usePaseo, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1176,8 +1175,7 @@ function AnimationAnchor({ value }: { value: Animated.Value }) {
 
 export function AgentDashboard(props: PluginWorkspacePanelProps & { openConfiguration?(): void }) {
   const { t } = useTranslation(messages);
-  const read = useRpc(researchReadRpc);
-  const query = useQuery({ queryKey: ["research", { workspaceId: props.workspaceId }], queryFn: () => read({ workspaceId: props.workspaceId }), refetchInterval: 5000 });
+  const query = useResearch({ workspaceId: props.workspaceId });
   if (query.data?.team) return <ResearchGraph {...props} data={query.data} />;
   const c = props.theme.colors;
   return <View style={{ flex: 1, padding: props.layout.compact ? 16 : 24, gap: 12, backgroundColor: c.surface0 }}>

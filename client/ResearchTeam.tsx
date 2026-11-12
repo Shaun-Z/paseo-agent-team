@@ -1,4 +1,4 @@
-import { graphLine, memberGraph } from "../shared/member-graph";
+import { MEMBER_CARD_HEIGHT, MEMBER_CARD_WIDTH, memberCommunicationGraph } from "../shared/member-graph";
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
@@ -12,6 +12,8 @@ import { teamHistory, type HistoryFilter } from "../shared/team-history";
 import { TeamTimeline } from "./TeamTimeline";
 import { useTeamHistory } from "./useTeamHistory";
 import { ResearchTeamConfig, type ResearchEditTarget } from "./ResearchTeamConfig";
+import { CurrentMemberSettings } from "./MemberSettings";
+import { MemberConnectionCounts, MemberConnectionPaths } from "./MemberConnections";
 
 function nextId(prefix: string, used: string[]) { let n = 1; while (used.includes(`${prefix}-${n}`)) n++; return `${prefix}-${n}`; }
 type Target = { workspaceId: string } | { projectId: string };
@@ -27,7 +29,7 @@ function PromptFilesInput({ label, files, onChange, colors }: { label: string; f
     onChangeText={text => { const next = text.split(/[,\n]/).map(path => path.trim()).filter(Boolean); own.current = JSON.stringify(next); setValue(text); onChange(next); }}
     style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 6, padding: 8, color: colors.foreground, backgroundColor: colors.surface0 }} /></View>;
 }
-function useResearch(target: Target) {
+export function useResearch(target: Target) {
   const read = useRpc(researchReadRpc);
   const paseo = usePaseo();
   const query = useQuery({ queryKey: ["research", target], queryFn: () => read(target), refetchInterval: 5000 });
@@ -64,7 +66,7 @@ export function ResearchGraph({ data, theme, navigation, openConfiguration }: Su
   const selectEdge = (from: string, to: string) => { setHistoryFilter({ from, to, kind: "message" }); setTab("timeline"); };
   const memberName = (id: string) => team.members.find(member => member.id === id)?.name ?? id;
   const lead = team.members.find(member => member.id === team.orchestratorMemberId)!;
-  const graph = memberGraph(team.members.map(member => member.id), lead.id);
+  const graph = memberCommunicationGraph(team.members.map(member => member.id), lead.id, edges);
   const leadState = data.members.find(member => member.id === lead.id);
   const working = data.members.filter(member => member.status === "running" || member.status === "initializing").length;
   const attention = data.members.filter(member => member.status === "attention" || member.status === "error" || member.error).length;
@@ -79,16 +81,19 @@ export function ResearchGraph({ data, theme, navigation, openConfiguration }: Su
   const statusKeys = { missing: "research.status.missing", initializing: "research.status.initializing", idle: "research.status.idle", running: "research.status.running", closed: "research.status.closed", error: "research.status.error", attention: "research.status.attention" } as const;
   const node = (member: ResearchTeam["members"][number]) => {
     const state = data.members.find(entry => entry.id === member.id);
+    const current = state?.sessionSettings;
+    const thinking = current?.effectiveThinkingOptionId ?? current?.thinkingOptionId;
     return <Pressable key={member.id} disabled={!state?.agentId || !navigation} onPress={() => state?.agentId && navigation?.openAgent({ agentId: state.agentId })}
       accessibilityRole="button" accessibilityLabel={t("research.openMember", { member: member.name ?? member.id })}
-      style={{ borderWidth: 1, borderColor: member.id === team.orchestratorMemberId || [historyFilter.from, historyFilter.to, historyFilter.member].includes(member.id) ? c.accent : c.border, borderLeftWidth: member.id === team.orchestratorMemberId ? 5 : 1, borderRadius: 8, padding: 10, width: 224, height: 124, overflow: "hidden", backgroundColor: c.surface1, gap: 4 }}>
+      style={{ borderWidth: 1, borderColor: member.id === team.orchestratorMemberId || [historyFilter.from, historyFilter.to, historyFilter.member].includes(member.id) ? c.accent : c.border, borderLeftWidth: member.id === team.orchestratorMemberId ? 5 : 1, borderRadius: 8, padding: 10, width: MEMBER_CARD_WIDTH, height: MEMBER_CARD_HEIGHT, overflow: "hidden", backgroundColor: c.surface1, gap: 4 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Text numberOfLines={1} style={{ color: c.foreground, fontWeight: "600", flex: 1 }}>{member.name ?? member.id}</Text>
         <Text style={{ color: state?.status === "error" ? c.statusDanger : state?.status === "attention" ? c.statusWarning : state?.status === "running" ? c.accent : c.foregroundMuted, fontSize: 10 }}>{t(statusKeys[(state?.status ?? "missing") as keyof typeof statusKeys] ?? statusKeys.error)}</Text>
       </View>
-      <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11 }}>{member.id === lead.id ? t("orchestrator") : team.roles.find(role => role.id === member.roleId)?.name} · {data.profiles.find(profile => profile.id === data.bindings[member.id])?.name ?? member.launchSnapshot.provider}</Text>
-      <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11 }}>{member.launchSnapshot.model}</Text>
-      {state?.pending ? <Text numberOfLines={1} style={{ color: c.accent, fontSize: 11 }}>{t("research.ui.pending")}</Text> : state?.error ? <Text numberOfLines={2} style={{ color: c.statusDanger, fontSize: 11 }}>{state.error}</Text> : state?.agentId && requests.get(state.agentId) ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 11 }}>{requests.get(state.agentId)}</Text> : null}
+      <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11 }}>{member.id === lead.id ? t("orchestrator") : team.roles.find(role => role.id === member.roleId)?.name} · {current?.provider ?? member.launchSnapshot.provider}</Text>
+      <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 11 }}>{current ? `${current.model ?? t("research.ui.notReported")} · ${t("research.ui.thinkingLevel")}: ${thinking ?? t("research.ui.notReported")}` : `${t("research.ui.savedSettings")}: ${member.launchSnapshot.model}`}</Text>
+      {state?.settingsChanged && <Text numberOfLines={1} style={{ color: c.statusWarning, fontSize: 10 }}>{t("research.ui.settingsChanged")}</Text>}
+      {state?.pending ? <Text numberOfLines={1} style={{ color: c.accent, fontSize: 11 }}>{t("research.ui.pending")}</Text> : state?.error ? <Text numberOfLines={state.settingsChanged ? 1 : 2} style={{ color: c.statusDanger, fontSize: 11 }}>{state.error}</Text> : !state?.settingsChanged && state?.agentId && requests.get(state.agentId) ? <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 11 }}>{requests.get(state.agentId)}</Text> : null}
     </Pressable>;
   };
   return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
@@ -112,36 +117,11 @@ export function ResearchGraph({ data, theme, navigation, openConfiguration }: Su
     <View style={{ flex: wide ? 1 : undefined, width: wide ? undefined : "100%", minWidth: 0, gap: 8 }}>
     <Text style={{ color: c.foreground, fontWeight: "600", fontSize: 14 }}>{t("research.graph")}</Text>
     <ScrollView horizontal>
-      <View style={{ width: graph.width + (edges.length ? 40 + edges.length * 12 : 0), height: graph.height + 64, backgroundColor: c.surface0 }}>
-        {[...team.members.filter(member => member.id !== lead.id).map(member => ({ from: lead.id, to: member.id, count: 0, lastText: "" })), ...edges].map((edge, index) => {
-          const line = graphLine(graph.nodes.get(edge.from)!, graph.nodes.get(edge.to)!);
-          if (!line) return null;
-          const a = graph.nodes.get(edge.from)!, b = graph.nodes.get(edge.to)!;
-          const peer = edge.count > 0 && edge.from !== lead.id && edge.to !== lead.id;
-          const lane = graph.width + 20 + (index - team.members.length + 1) * 8;
-          const belowA = a.y + a.height + 28 + index % 3 * 10, belowB = b.y + b.height + 28 + index % 3 * 10;
-          const points = peer
-            ? [{ x: a.x + a.width / 2, y: a.y + a.height }, { x: a.x + a.width / 2, y: belowA },
-              ...(a.y === b.y ? [] : [{ x: lane, y: belowA }, { x: lane, y: belowB }]),
-              { x: b.x + b.width / 2, y: belowB }, { x: b.x + b.width / 2, y: b.y + b.height }]
-            : [{ x: line.x, y: line.y }, { x: line.endX, y: line.endY }];
-          const last = points.at(-1)!, beforeLast = points.at(-2)!;
-          const arrowAngle = Math.atan2(last.y - beforeLast.y, last.x - beforeLast.x) * 180 / Math.PI;
-          const label = peer ? { x: (a.x + b.x + a.width) / 2, y: belowA } : { x: (line.x + line.endX) / 2, y: (line.y + line.endY) / 2 };
-          const color = edge.count && (!focused || selectedEdge(edge.from, edge.to)) ? c.accent : c.border;
-          return <View key={index} pointerEvents="box-none" style={{ position: "absolute", left: 0, top: 0, width: graph.width + 40 + edges.length * 12, height: graph.height + 64 }}>
-            {points.slice(1).map((point, segment) => {
-              const previous = points[segment]!, dx = point.x - previous.x, dy = point.y - previous.y;
-              const length = Math.hypot(dx, dy), angle = Math.atan2(dy, dx) * 180 / Math.PI;
-              return <View key={segment} pointerEvents="none" style={{ position: "absolute", left: (previous.x + point.x) / 2 - length / 2, top: (previous.y + point.y) / 2, width: length, height: edge.count ? 2 : 1, backgroundColor: color, transform: [{ rotate: `${angle}deg` }] }} />;
-            })}
-            {edge.count > 0 && <>
-              <View pointerEvents="none" style={{ position: "absolute", left: last.x - 5, top: last.y - 5, width: 10, height: 10, borderTopWidth: 2, borderRightWidth: 2, borderColor: color, transform: [{ rotate: `${arrowAngle + 45}deg` }] }} />
-              <Pressable accessibilityRole="button" accessibilityLabel={t("research.history.filterDirection", { from: memberName(edge.from), to: memberName(edge.to) })} onPress={() => selectEdge(edge.from, edge.to)} style={{ position: "absolute", left: label.x, top: label.y - 24, padding: 6, backgroundColor: c.surface0 }}><Text style={{ color }}>{edge.count}</Text></Pressable>
-            </>}
-          </View>;
-        })}
+      <View style={{ width: graph.width, height: graph.height, backgroundColor: c.surface0 }}>
+        <MemberConnectionPaths connections={graph.connections} colors={c} selected={edge => selectedEdge(edge.from, edge.to)} focused={focused} />
         {team.members.map(member => { const pos = graph.nodes.get(member.id)!; return <View key={member.id} style={{ position: "absolute", left: pos.x, top: pos.y }}>{node(member)}</View>; })}
+        <MemberConnectionCounts connections={graph.connections} colors={c} selected={edge => selectedEdge(edge.from, edge.to)} focused={focused}
+          onSelect={edge => selectEdge(edge.from, edge.to)} label={edge => `${t("research.history.filterDirection", { from: memberName(edge.from), to: memberName(edge.to) })} (${edge.count})`} />
       </View>
     </ScrollView>
     <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{t("research.ui.graphHint")}</Text>
@@ -244,6 +224,7 @@ export function ResearchTeamEditor({ target, onBack, onApplied, initialEdit, ...
       {button(t("research.selectProfile"), () => setProfilePicker(profilePicker === member.id ? null : member.id))}
       {profilePicker === member.id && <View style={{ gap: 6 }}>{!data.profiles.length && <Text style={{ color: c.foregroundMuted }}>{t("research.noProfiles")}</Text>}{data.profiles.map(profile => <View key={profile.id}>{button(`${profile.name} · ${profile.provider}/${profile.model ?? "—"}`, () => { setBindings({ ...bindings, [member.id]: profile.id }); setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, launchSnapshot: launchFromProfile(profile) } : m) }); setProfilePicker(null); })}</View>)}</View>}
       <Text style={{ color: c.foregroundMuted }}>{data.profiles.find(p => p.id === bindings[member.id])?.name} · {member.launchSnapshot.provider}/{member.launchSnapshot.model}</Text>
+      <CurrentMemberSettings state={data.members.find(state => state.id === member.id)} colors={c} />
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: showLaunch }} onPress={() => setShowLaunch(value => !value)}><Text style={{ color: c.accent, fontSize: 12 }}>{t("research.ui.launchSettings")}{showLaunch ? " ▾" : " ▸"}</Text></Pressable>
       {showLaunch && <Text selectable style={{ color: c.foregroundMuted, fontSize: 12 }}>{JSON.stringify(member.launchSnapshot, null, 2)}</Text>}
       {!data.profiles.find(profile => profile.id === bindings[member.id])?.model && field(t("role.model"), member.launchSnapshot.model, model => setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, launchSnapshot: { ...m.launchSnapshot, model } } : m) }))}

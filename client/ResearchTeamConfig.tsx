@@ -6,6 +6,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import type { researchReadRpc } from "../shared/research-rpc";
 import { messages } from "./i18n";
 import { styles } from "./ui";
+import { CurrentMemberSettings, SettingsLine } from "./MemberSettings";
 
 export type ResearchEditTarget = { section: "team" | "roles" | "members"; memberId?: string; roleId?: string };
 type Props = Pick<PluginWorkspacePanelProps, "theme" | "layout" | "navigation"> & {
@@ -14,7 +15,7 @@ type Props = Pick<PluginWorkspacePanelProps, "theme" | "layout" | "navigation"> 
   openDashboard?(): void;
 };
 
-/** Saved configuration only. Live graph, messages and timeline belong to Dashboard. */
+/** Saved configuration and a session comparison. Activity belongs to Dashboard. */
 export function ResearchTeamConfig({ data, theme, layout, navigation, onEdit, openDashboard }: Props) {
   const { t } = useTranslation(messages);
   const [tab, setTab] = useState<"members" | "prompts">("members");
@@ -57,7 +58,8 @@ export function ResearchTeamConfig({ data, theme, layout, navigation, onEdit, op
                 {state?.pending && <Text style={{ color: c.statusWarning, fontSize: 11 }}>{t("research.ui.pending")}</Text>}
               </View>
               <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>{role.name} · {profile?.name ?? member.launchSnapshot.provider}</Text>
-              <Text numberOfLines={2} style={{ color: c.foregroundMuted, fontSize: 12 }}>{member.launchSnapshot.provider}/{member.launchSnapshot.model}{member.launchSnapshot.modeId ? ` · ${member.launchSnapshot.modeId}` : ""}{member.launchSnapshot.thinkingOptionId ? ` · ${member.launchSnapshot.thinkingOptionId}` : ""}</Text>
+              <SettingsLine settings={member.launchSnapshot} saved colors={c} />
+              <CurrentMemberSettings state={state} colors={c} />
             </View>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {state?.agentId && navigation && action(t("research.history.openConversation"), () => navigation.openAgent({ agentId: state.agentId! }))}
