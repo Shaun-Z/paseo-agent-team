@@ -1,7 +1,7 @@
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { researchApplyRpc } from "../shared/research-rpc";
-import { ResearchTeamPanel } from "./ResearchTeam";
+import { ResearchTeamEditor } from "./ResearchTeam";
 
 export const PROJECT_TEAMS_KEY = ["workspace-agents", "projects"] as const;
 
@@ -14,5 +14,5 @@ export function TeamPanel({ workspaceId, ...props }: PluginWorkspacePanelProps &
   return <TeamEditor {...props} target={{ workspaceId }} />;
 }
 export function TeamEditor(props: EditorProps) {
-  return <ResearchTeamPanel {...props} />;
+  return <ResearchTeamEditor {...props} />;
 }

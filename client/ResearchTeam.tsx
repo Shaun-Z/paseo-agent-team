@@ -2,32 +2,39 @@ import { fitMemberGraph, MEMBER_CARD_HEIGHT, MEMBER_CARD_WIDTH, memberCommunicat
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { researchApplyRpc, researchReadRpc, researchResetRpc } from "../shared/research-rpc";
-import { launchFromProfile, messageEdges, ResearchTeamSchema, type ResearchTeam } from "../shared/research-team";
+import { canonical, launchFromProfile, messageEdges, ResearchTeamSchema, type ResearchTeam } from "../shared/research-team";
 import { messages } from "./i18n";
 import { teamHistory, type HistoryFilter } from "../shared/team-history";
 import { TeamTimeline } from "./TeamTimeline";
 import { useTeamHistory } from "./useTeamHistory";
-import { ResearchTeamConfig, type ResearchEditTarget } from "./ResearchTeamConfig";
-import { CurrentMemberSettings } from "./MemberSettings";
+import { CurrentMemberSettings, SettingsLine } from "./MemberSettings";
 import { MemberConnectionCounts, MemberConnectionPaths } from "./MemberConnections";
+import { TeamConfigTransfer } from "./TeamConfigTransfer";
+import { PromptFilePicker } from "./PromptFilePicker";
+import { TeamAction } from "./TeamControls";
+import { MemberLaunchEditor } from "./MemberLaunchEditor";
+import { GitTeamImport } from "./GitTeamImport";
 
 function nextId(prefix: string, used: string[]) { let n = 1; while (used.includes(`${prefix}-${n}`)) n++; return `${prefix}-${n}`; }
 type Target = { workspaceId: string } | { projectId: string };
 type Surface = Pick<PluginWorkspacePanelProps, "theme" | "layout" | "navigation">;
 type State = RpcOutput<typeof researchReadRpc>;
 type Applied = RpcOutput<typeof researchApplyRpc>;
-function PromptFilesInput({ label, files, onChange, colors }: { label: string; files: string[]; onChange(files: string[]): void; colors: Surface["theme"]["colors"] }) {
+function PromptFilesInput({ label, files, onChange, colors, target }: { label: string; files: string[]; onChange(files: string[]): void; colors: Surface["theme"]["colors"]; target: Target }) {
   const [value, setValue] = useState(files.join(", "));
   const own = useRef(JSON.stringify(files));
   const key = JSON.stringify(files);
   useEffect(() => { if (key !== own.current) { own.current = key; setValue(files.join(", ")); } }, [key]);
-  return <View style={{ gap: 4 }}><Text style={{ color: colors.foregroundMuted }}>{label}</Text><TextInput accessibilityLabel={label} value={value}
-    onChangeText={text => { const next = text.split(/[,\n]/).map(path => path.trim()).filter(Boolean); own.current = JSON.stringify(next); setValue(text); onChange(next); }}
-    style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 6, padding: 8, color: colors.foreground, backgroundColor: colors.surface0 }} /></View>;
+  return <View style={{ gap: 6 }}><Text style={{ color: colors.foregroundMuted, fontSize: 12, fontWeight: "500" }}>{label}</Text>
+    <PromptFilePicker target={target} selected={files} onChange={onChange} colors={colors} input={<TextInput accessibilityLabel={label} value={value}
+      onChangeText={text => { const next = text.split(/[,\n]/).map(path => path.trim()).filter(Boolean); own.current = JSON.stringify(next); setValue(text); onChange(next); }}
+      style={{ flex: 1, minWidth: 0, borderWidth: 1, borderColor: colors.border, borderRadius: 9, padding: 10, fontSize: 13, color: colors.foreground, backgroundColor: colors.surface0 }} />} /></View>;
+
 }
 export function useResearch(target: Target) {
   const read = useRpc(researchReadRpc);
@@ -37,14 +44,6 @@ export function useResearch(target: Target) {
     if (!timer) timer = setTimeout(() => { timer = undefined; void query.refetch(); }, 1000);
   }); return () => { off(); if (timer) clearTimeout(timer); }; }, [paseo, JSON.stringify(target)]);
   return query;
-}
-export function ResearchTeamPanel({ target, onBack, onApplied, openDashboard, ...surface }: Surface & { target: Target; onBack?(): void; onApplied?(result: Applied): void; openDashboard?(): void }) {
-  const query = useResearch(target);
-  const { t } = useTranslation(messages);
-  const [editing, setEditing] = useState<ResearchEditTarget | null>(null);
-  if (!query.data) return <Text style={{ color: query.error ? surface.theme.colors.statusDanger : surface.theme.colors.foregroundMuted }}>{query.error ? String(query.error) : t("loading")}</Text>;
-  if (editing || !query.data.team) return <ResearchTeamEditor {...surface} target={target} initialEdit={editing ?? undefined} onBack={query.data.team ? () => setEditing(null) : onBack} onApplied={result => { setEditing(null); onApplied?.(result); }} />;
-  return <ResearchTeamConfig {...surface} data={query.data} onEdit={setEditing} openDashboard={openDashboard} />;
 }
 
 export function ResearchGraph({ data, theme, navigation, openConfiguration }: Surface & { data: State; openConfiguration?(): void }) {
@@ -146,7 +145,7 @@ export function ResearchGraph({ data, theme, navigation, openConfiguration }: Su
   </View>;
 }
 
-export function ResearchTeamEditor({ target, onBack, onApplied, initialEdit, ...surface }: Surface & { target: Target; onBack?(): void; onApplied?(result: Applied): void; initialEdit?: ResearchEditTarget }) {
+export function ResearchTeamEditor({ target, onBack, onApplied, openDashboard, ...surface }: Surface & { target: Target; onBack?(): void; onApplied?(result: Applied): void; openDashboard?(): void }) {
   const { t } = useTranslation(messages);
   const c = surface.theme.colors;
   const query = useResearch(target);
@@ -158,51 +157,85 @@ export function ResearchTeamEditor({ target, onBack, onApplied, initialEdit, ...
   const [profilePicker, setProfilePicker] = useState<string | null>(null);
   const [resetId, setResetId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [section, setSection] = useState<"team" | "roles" | "members">(initialEdit?.section ?? "team");
+  const [section, setSection] = useState<"team" | "roles" | "members">("team");
   const [openRole, setOpenRole] = useState<number | null>(null);
   const [openMember, setOpenMember] = useState<number | null>(null);
-  const [showLaunch, setShowLaunch] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const data = query.data;
   useEffect(() => setSaved(false), [draft]);
   useEffect(() => {
-    if (!data || draft) return;
-    setDraft(data.team ?? { version: 2, id: "research-team", goal: "", workspace: data.workspace ?? "research", commonPromptFiles: ["prompts/research-team-common.md"], orchestratorMemberId: "anchor-main",
-      roles: [{ id: "anchor", name: "Anchor", promptFiles: ["prompts/anchor.md"] }, { id: "programmer", name: "Programmer", promptFiles: ["prompts/programmer.md"] }, { id: "mathematician", name: "Mathematician", promptFiles: ["prompts/mathematician.md"] }],
-      members: ["anchor", "programmer", "mathematician"].map(roleId => ({ id: `${roleId}-main`, roleId, launchSnapshot: { provider: "", model: "" } })) });
+    if (!data?.team || draft) return;
+    setDraft(data.team);
     setBindings(data.bindings);
-    const team = data.team;
-    if (team && initialEdit?.memberId) { const index = team.members.findIndex(member => member.id === initialEdit.memberId); setOpenMember(index >= 0 ? index : null); }
-    if (team && initialEdit?.roleId) { const index = team.roles.findIndex(role => role.id === initialEdit.roleId); setOpenRole(index >= 0 ? index : null); }
-  }, [data, draft, initialEdit]);
+  }, [data, draft]);
   const refresh = async () => { await query.refetch(); void cache.invalidateQueries({ queryKey: ["workspace-agents"] }); void cache.invalidateQueries({ queryKey: ["dashboard"] }); };
   const save = useMutation({ mutationFn: () => apply({ ...target, team: draft!, bindings }), onSuccess: async result => { setSaved(true); await refresh(); onApplied?.(result); } });
   const restart = useMutation({ mutationFn: (memberId: string) => reset({ workspaceId: "workspaceId" in target ? target.workspaceId : save.data!.workspaceId, memberId }), onSuccess: () => { setResetId(null); refresh(); } });
-  const card = { borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 12, gap: 8, backgroundColor: c.surface1 };
-  const input = { borderWidth: 1, borderColor: c.border, borderRadius: 6, padding: 8, color: c.foreground, backgroundColor: c.surface0 };
-  const button = (label: string, action: () => void, disabled = false) => <Pressable disabled={disabled} onPress={action} accessibilityRole="button" style={{ borderWidth: 1, borderColor: c.border, padding: 8, borderRadius: 6, opacity: disabled ? 0.5 : 1 }}><Text style={{ color: c.accent }}>{label}</Text></Pressable>;
-  const field = (label: string, value: string, change: (value: string) => void, editable = true) => <View style={{ gap: 4 }}><Text style={{ color: c.foregroundMuted }}>{label}</Text><TextInput accessibilityLabel={label} editable={editable} value={value} onChangeText={change} style={input} /></View>;
-  if (!draft || !data) return <Text style={{ color: query.error ? c.statusDanger : c.foregroundMuted }}>{query.error ? String(query.error) : t("loading")}</Text>;
-  const parsed = ResearchTeamSchema.safeParse(draft);
-  const needsProfiles = draft.members.some(member => !member.launchSnapshot.provider || !member.launchSnapshot.model);
-  return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
-    <View style={{ paddingHorizontal: 16, paddingTop: 12, gap: 12, borderBottomWidth: 1, borderColor: c.border }}>
-      <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <Text style={{ color: c.foreground, fontSize: 18, fontWeight: "600", flex: 1 }}>{t(data.team ? "research.ui.edit" : "research.create")}</Text>
-        {onBack && button(t("review.cancel"), onBack, save.isPending || restart.isPending)}
-        {button(t("review.apply"), () => { setSaved(false); save.mutate(); }, !parsed.success || save.isPending || restart.isPending)}
+  const discard = () => {
+    setDraft(null); setOpenRole(null); setOpenMember(null); setProfilePicker(null); setResetId(null);
+    setSection("team");
+    save.reset(); restart.reset();
+  };
+  const reload = useMutation({ mutationFn: async () => {
+    const result = await query.refetch();
+    if (result.error) throw result.error;
+    if (result.data?.errors.length && !result.data.team) throw new Error(result.data.errors.join("\n"));
+    return result.data;
+  }, onSuccess: fresh => { discard(); setDraft(fresh?.team ?? null); setBindings(fresh?.bindings ?? {}); void cache.invalidateQueries({ queryKey: ["workspace-agents"] }); } });
+  const card = { borderWidth: 1, borderColor: c.border, borderRadius: 12, padding: 18, gap: 14, backgroundColor: c.surface1 };
+  const input = { borderWidth: 1, borderColor: c.border, borderRadius: 9, padding: 10, fontSize: 13, color: c.foreground, backgroundColor: c.surface0 };
+  const button = (label: string, action: () => void, disabled = false, icon = "Plus", iconOnly = false, primary = false, danger = false) => <TeamAction label={label} onPress={action} disabled={disabled} icon={icon} iconOnly={iconOnly} primary={primary} danger={danger} colors={c} />;
+  const field = (label: string, value: string, change: (value: string) => void, editable = true) => <View style={{ gap: 6 }}><Text style={{ color: c.foregroundMuted, fontSize: 12, fontWeight: "500" }}>{label}</Text><TextInput accessibilityLabel={label} editable={editable} value={value} onChangeText={change} style={input} /></View>;
+  if (!data) return <Text style={{ color: query.error ? c.statusDanger : c.foregroundMuted }}>{query.error ? String(query.error) : t("loading")}</Text>;
+  if (!draft) {
+    if (data.team) return <Text style={{ color: c.foregroundMuted }}>{t("loading")}</Text>;
+    return <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ padding: surface.layout.compact ? 16 : 28, gap: 20 }}>
+      <View style={{ width: "100%", maxWidth: 620, alignSelf: "center", gap: 18, paddingTop: 30 }}>
+        <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: c.surface2, alignItems: "center", justifyContent: "center" }}><Icon name="Users" size={24} color={c.accent} /></View>
+        <View style={{ gap: 6 }}><Text style={{ color: c.foreground, fontSize: 24, fontWeight: "600" }}>{t("research.create")}</Text><Text selectable numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12 }}>{data.project.root}</Text></View>
+        {data.errors.map(error => <Text key={error} style={{ color: c.statusDanger }}>{error}</Text>)}
+        <Text style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 20 }}>{t("research.setup.createHint")}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          {button(t("research.setup.createConfiguration"), () => {
+            discard(); reload.reset(); setBindings({});
+            setDraft({ version: 2, id: "research-team", workspace: data.workspace ?? "research", goal: "", commonPromptFiles: [], roles: [], members: [], orchestratorMemberId: "" });
+          }, reload.isPending || transferring, "Plus", false, true)}
+          {"workspaceId" in target && <TeamConfigTransfer workspaceId={target.workspaceId} hasFile={!!data.file} fileName={data.file ?? "team.yaml"} disabled={reload.isPending} theme={surface.theme} onLoaded={() => reload.mutateAsync()} onBusyChange={setTransferring} />}
+        <GitTeamImport target={target} theme={surface.theme} disabled={reload.isPending || transferring} onBusyChange={setTransferring} onImported={async result => { await reload.mutateAsync(); if ("projectId" in target) setDraft(ResearchTeamSchema.parse(result.team)); }} />
+        </View>
+        {reload.error && <Text style={{ color: c.statusDanger }}>{String(reload.error)}</Text>}
+        {onBack && button(t("review.cancel"), onBack, false, "ArrowLeft", true)}
       </View>
-      <View style={{ flexDirection: "row", gap: 20 }}>{(["team", "roles", "members"] as const).map(id => <Pressable key={id} accessibilityRole="button" accessibilityState={{ selected: section === id }} onPress={() => setSection(id)} style={{ paddingVertical: 8, borderBottomWidth: 2, borderColor: section === id ? c.accent : "transparent" }}><Text style={{ color: section === id ? c.foreground : c.foregroundMuted, fontSize: 13, fontWeight: "600" }}>{t(id === "team" ? "research.ui.general" : id === "roles" ? "research.roles" : "research.members")}</Text></Pressable>)}</View>
+    </ScrollView>;
+  }
+  const parsed = ResearchTeamSchema.safeParse(draft);
+  const needsLaunchSettings = draft.members.some(member => !member.launchSnapshot.provider || !member.launchSnapshot.model);
+  return <View style={{ flex: 1, backgroundColor: c.surface0 }}>
+    <View style={{ paddingHorizontal: surface.layout.compact ? 12 : 20, paddingTop: 14, paddingBottom: 12, gap: 14, borderBottomWidth: 1, borderColor: c.border }}>
+      <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <Text style={{ color: c.foreground, fontSize: 20, fontWeight: "600", flex: 1, minWidth: 140 }}>{t(data.team ? "research.ui.configuration" : "research.create")}</Text>
+        {openDashboard && data.team && button(t("research.ui.openDashboard"), openDashboard, false, "Network", true)}
+      {"workspaceId" in target && <TeamConfigTransfer workspaceId={target.workspaceId} hasFile={!!data.file} fileName={data.file ?? "team.yaml"} disabled={save.isPending || restart.isPending || reload.isPending} theme={surface.theme} onLoaded={() => reload.mutateAsync()} onBusyChange={setTransferring} />}
+        <GitTeamImport target={target} workspaceName={draft.workspace} theme={surface.theme} disabled={save.isPending || restart.isPending || reload.isPending || transferring} onBusyChange={setTransferring} onImported={async result => { await reload.mutateAsync(); if ("projectId" in target) setDraft(ResearchTeamSchema.parse(result.team)); }} />
+        {button(t("research.ui.reloadFile"), () => reload.mutate(), save.isPending || restart.isPending || reload.isPending || transferring, "RotateCw", true)}
+        {button(t("review.cancel"), discard, save.isPending || restart.isPending || reload.isPending || transferring, "X", true)}
+        {button(t("review.apply"), () => { setSaved(false); save.mutate(); }, !parsed.success || save.isPending || restart.isPending || reload.isPending || transferring, "Check", false, true)}
+      </View>
+      <View style={{ flexDirection: "row", alignSelf: "flex-start", padding: 3, gap: 3, borderRadius: 10, backgroundColor: c.surface1 }}>{(["team", "roles", "members"] as const).map(id => <Pressable key={id} accessibilityRole="button" accessibilityState={{ selected: section === id }} onPress={() => setSection(id)} style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 7, backgroundColor: section === id ? c.surface2 : "transparent" }}><Text style={{ color: section === id ? c.foreground : c.foregroundMuted, fontSize: 12, fontWeight: "600" }}>{t(id === "team" ? "research.ui.general" : id === "roles" ? "research.roles" : "research.members")}</Text>{id !== "team" && <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{id === "roles" ? draft.roles.length : draft.members.length}</Text>}</Pressable>)}</View>
     </View>
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+    <ScrollView contentContainerStyle={{ padding: surface.layout.compact ? 12 : 20, gap: 14, width: "100%", maxWidth: 980, alignSelf: "center" }}>
     {section !== "members" && <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>{t("research.promptHint")}</Text>}
     {data.errors.map(error => <Text key={error} style={{ color: c.statusDanger }}>{error}</Text>)}
     {section === "team" && <View style={card}>
       {field(t("research.teamId"), draft.id, id => setDraft({ ...draft, id }), !data.team)}
       {field(t("role.workspace"), draft.workspace, workspace => setDraft({ ...draft, workspace }), !data.workspace && !data.team)}
       {field(t("research.goal"), draft.goal, goal => setDraft({ ...draft, goal }))}
-      <PromptFilesInput label={t("research.commonPrompts")} files={draft.commonPromptFiles} colors={c} onChange={commonPromptFiles => setDraft({ ...draft, commonPromptFiles })} />
+      <PromptFilesInput target={target} label={t("research.commonPrompts")} files={draft.commonPromptFiles} colors={c} onChange={commonPromptFiles => setDraft({ ...draft, commonPromptFiles })} />
+      {data.file && <Text selectable style={{ color: c.foregroundMuted, fontSize: 11 }}>{t("research.ui.teamDefinition")}: {data.file}</Text>}
+      {data.file && <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>{t("research.ui.fileHint")}</Text>}
     </View>}
     {section === "roles" && <>
+    {!draft.roles.length && <View style={{ ...card, alignItems: "center", paddingVertical: 30 }}><Icon name="Layers" size={24} color={c.foregroundMuted} /><Text style={{ color: c.foregroundMuted, fontSize: 13 }}>{t("research.ui.emptyRoles")}</Text></View>}
     {draft.roles.map((role, index) => <View key={index} style={card}>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: openRole === index }} onPress={() => setOpenRole(openRole === index ? null : index)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <View style={{ flex: 1, gap: 4 }}><Text style={{ color: c.foreground, fontWeight: "600" }}>{role.name || role.id}</Text><Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12 }}>{role.promptFiles.join(", ") || t("research.rolePrompts")}</Text></View><Text style={{ color: c.foregroundMuted }}>{openRole === index ? "▾" : "▸"}</Text>
@@ -210,40 +243,50 @@ export function ResearchTeamEditor({ target, onBack, onApplied, initialEdit, ...
       {openRole === index && <View style={{ gap: 10, paddingTop: 6 }}>
       {field(t("research.roleId"), role.id, id => setDraft({ ...draft, roles: draft.roles.map((r, i) => i === index ? { ...r, id } : r), members: draft.members.map(m => m.roleId === role.id ? { ...m, roleId: id } : m) }))}
       {field(t("role.name"), role.name, name => setDraft({ ...draft, roles: draft.roles.map((r, i) => i === index ? { ...r, name } : r) }))}
-      <PromptFilesInput label={t("research.rolePrompts")} files={role.promptFiles} colors={c} onChange={promptFiles => setDraft({ ...draft, roles: draft.roles.map((r, i) => i === index ? { ...r, promptFiles } : r) })} />
-      {button(t("role.remove"), () => { setOpenRole(null); setDraft({ ...draft, roles: draft.roles.filter((_, i) => i !== index) }); })}
+      <PromptFilesInput target={target} label={t("research.rolePrompts")} files={role.promptFiles} colors={c} onChange={promptFiles => setDraft({ ...draft, roles: draft.roles.map((r, i) => i === index ? { ...r, promptFiles } : r) })} />
+      {button(t("role.remove"), () => { setOpenRole(null); setDraft({ ...draft, roles: draft.roles.filter((_, i) => i !== index) }); }, false, "Trash2", true, false, true)}
       </View>}
     </View>)}
     {button(t("review.addRole"), () => { setOpenRole(draft.roles.length); setDraft({ ...draft, roles: [...draft.roles, { id: nextId("role", draft.roles.map(role => role.id)), name: "", promptFiles: [] }] }); })}
     </>}
     {section === "members" && <>
+    {!draft.members.length && <View style={{ ...card, alignItems: "center", paddingVertical: 30 }}><Icon name="Users" size={24} color={c.foregroundMuted} /><Text style={{ color: c.foregroundMuted, fontSize: 13 }}>{t("research.ui.emptyMembers")}</Text></View>}
     {draft.members.map((member, index) => <View key={index} style={card}>
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded: openMember === index }} onPress={() => { setOpenMember(openMember === index ? null : index); setShowLaunch(false); setProfilePicker(null); }} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <View style={{ flex: 1, gap: 4 }}><Text style={{ color: c.foreground, fontWeight: "600" }}>{member.name ?? member.id}{member.id === draft.orchestratorMemberId ? ` · ${t("orchestrator")}` : ""}</Text><Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12 }}>{draft.roles.find(role => role.id === member.roleId)?.name} · {data.profiles.find(profile => profile.id === bindings[member.id])?.name ?? member.launchSnapshot.provider} / {member.launchSnapshot.model || t("research.selectProfile")}</Text></View><Text style={{ color: c.foregroundMuted }}>{openMember === index ? "▾" : "▸"}</Text>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: openMember === index }} onPress={() => { setOpenMember(openMember === index ? null : index); setProfilePicker(null); }} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ flex: 1, gap: 4 }}><Text style={{ color: c.foreground, fontWeight: "600" }}>{member.name ?? member.id}{member.id === draft.orchestratorMemberId ? ` · ${t("orchestrator")}` : ""}</Text><Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 12 }}>{draft.roles.find(role => role.id === member.roleId)?.name} · {member.launchSnapshot.provider} / {member.launchSnapshot.model || t("research.selectProfile")}</Text></View><Text style={{ color: c.foregroundMuted }}>{openMember === index ? "▾" : "▸"}</Text>
       </Pressable>
       {openMember === index && <View style={{ gap: 10, paddingTop: 6 }}>
       {field(t("research.memberId"), member.id, id => { const next = { ...bindings, [id]: bindings[member.id] ?? "" }; delete next[member.id]; setBindings(next); setDraft({ ...draft, orchestratorMemberId: draft.orchestratorMemberId === member.id ? id : draft.orchestratorMemberId, members: draft.members.map((m, i) => i === index ? { ...m, id } : m) }); }, !data.team?.members.some(m => m.id === member.id))}
       {field(t("research.memberName"), member.name ?? member.id, name => setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, name } : m) }))}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>{draft.roles.map(role => <View key={role.id}>{button(`${member.roleId === role.id ? "● " : ""}${role.name || role.id}`, () => setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, roleId: role.id } : m) }))}</View>)}</View>
-      {button(t("research.selectProfile"), () => setProfilePicker(profilePicker === member.id ? null : member.id))}
-      {profilePicker === member.id && <View style={{ gap: 6 }}>{!data.profiles.length && <Text style={{ color: c.foregroundMuted }}>{t("research.noProfiles")}</Text>}{data.profiles.map(profile => <View key={profile.id}>{button(`${profile.name} · ${profile.provider}/${profile.model ?? "—"}`, () => { setBindings({ ...bindings, [member.id]: profile.id }); setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, launchSnapshot: launchFromProfile(profile) } : m) }); setProfilePicker(null); })}</View>)}</View>}
-      <Text style={{ color: c.foregroundMuted }}>{data.profiles.find(p => p.id === bindings[member.id])?.name} · {member.launchSnapshot.provider}/{member.launchSnapshot.model}</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>{draft.roles.map(role => <Pressable key={role.id} accessibilityRole="button" accessibilityState={{ selected: member.roleId === role.id }} onPress={() => setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, roleId: role.id } : m) })} style={{ paddingHorizontal: 11, paddingVertical: 7, borderRadius: 16, backgroundColor: member.roleId === role.id ? c.surface2 : c.surface0, borderWidth: 1, borderColor: member.roleId === role.id ? c.accent : c.border }}><Text style={{ color: member.roleId === role.id ? c.accent : c.foregroundMuted, fontSize: 12 }}>{role.name || role.id}</Text></Pressable>)}</View>
+      <Pressable accessibilityRole="button" accessibilityLabel={t("research.selectProfile")} accessibilityState={{ expanded: profilePicker === member.id }} onPress={() => setProfilePicker(profilePicker === member.id ? null : member.id)} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: c.border, borderRadius: 9, padding: 10, backgroundColor: c.surface0 }}><Icon name="Settings2" size={15} color={c.foregroundMuted} /><Text style={{ flex: 1, color: c.foreground, fontSize: 13 }}>{data.profiles.find(profile => profile.id === bindings[member.id])?.name ?? t("research.selectProfile")}</Text><Icon name={profilePicker === member.id ? "ChevronUp" : "ChevronDown"} size={14} color={c.foregroundMuted} /></Pressable>
+      {profilePicker === member.id && <View style={{ gap: 2, borderWidth: 1, borderColor: c.border, borderRadius: 9, padding: 4, backgroundColor: c.surface0 }}><Pressable accessibilityRole="button" onPress={() => { setBindings({ ...bindings, [member.id]: "" }); setProfilePicker(null); }} style={{ padding: 10 }}><Text style={{ color: c.foregroundMuted, fontSize: 13 }}>{t("research.launch.manual")}</Text></Pressable>{!data.profiles.length && <Text style={{ color: c.foregroundMuted }}>{t("research.noProfiles")}</Text>}{data.profiles.map(profile => <Pressable key={profile.id} accessibilityRole="button" onPress={() => { setBindings({ ...bindings, [member.id]: profile.id }); setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, launchSnapshot: launchFromProfile(profile) } : m) }); setProfilePicker(null); }} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 6, backgroundColor: bindings[member.id] === profile.id ? c.surface2 : "transparent" }}><View style={{ flex: 1, gap: 3 }}><Text style={{ color: c.foreground, fontSize: 13 }}>{profile.name}</Text><Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{profile.provider}/{profile.model ?? "—"}</Text></View>{bindings[member.id] === profile.id && <Icon name="Check" size={14} color={c.accent} />}</Pressable>)}</View>}
+      <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{t("research.launch.profileHint")}</Text>
+      {data.profiles.some(profile => profile.id === bindings[member.id] && canonical(launchFromProfile(profile)) !== canonical(member.launchSnapshot)) && <Text style={{ color: c.accent, fontSize: 11 }}>{t("research.launch.customized")}</Text>}
+      <MemberLaunchEditor key={member.id} value={member.launchSnapshot} cwd={data.project.root} colors={c} onChange={launchSnapshot => setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, launchSnapshot } : m) })} />
+      <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{t("research.launch.sessionHint")}</Text>
+      {data.team?.members.filter(saved => saved.id === member.id).map(saved => <SettingsLine key={saved.id} settings={saved.launchSnapshot} saved colors={c} />)}
       <CurrentMemberSettings state={data.members.find(state => state.id === member.id)} colors={c} />
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded: showLaunch }} onPress={() => setShowLaunch(value => !value)}><Text style={{ color: c.accent, fontSize: 12 }}>{t("research.ui.launchSettings")}{showLaunch ? " ▾" : " ▸"}</Text></Pressable>
-      {showLaunch && <Text selectable style={{ color: c.foregroundMuted, fontSize: 12 }}>{JSON.stringify(member.launchSnapshot, null, 2)}</Text>}
-      {!data.profiles.find(profile => profile.id === bindings[member.id])?.model && field(t("role.model"), member.launchSnapshot.model, model => setDraft({ ...draft, members: draft.members.map((m, i) => i === index ? { ...m, launchSnapshot: { ...m.launchSnapshot, model } } : m) }))}
-      {button(t("research.coordinator"), () => setDraft({ ...draft, orchestratorMemberId: member.id }), draft.orchestratorMemberId === member.id)}
-      {button(t("role.remove"), () => { setOpenMember(null); setDraft({ ...draft, members: draft.members.filter((_, i) => i !== index) }); })}
-      {data.members.some(m => m.id === member.id) && button(t("research.resetMember"), () => setResetId(member.id), restart.isPending)}
-      {resetId === member.id && <View style={{ gap: 6 }}><Text style={{ color: c.foreground }}>{t("research.resetHint")}</Text>{button(t("current.restartConfirm"), () => restart.mutate(member.id), restart.isPending)}{button(t("review.cancel"), () => setResetId(null))}</View>}
+      {(() => { const state = data.members.find(m => m.id === member.id); return <>
+        {state?.pending && <Text style={{ color: c.statusWarning, fontSize: 11 }}>{t("research.ui.pending")}</Text>}
+        {state?.error && <Text style={{ color: c.statusDanger, fontSize: 12 }}>{state.error}</Text>}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, borderTopWidth: 1, borderColor: c.border, paddingTop: 8 }}>
+          <TeamAction label={t("research.coordinator")} icon="Crown" iconOnly selected={draft.orchestratorMemberId === member.id} colors={c} onPress={() => setDraft({ ...draft, orchestratorMemberId: member.id })} />
+          {state?.agentId && surface.navigation && button(t("research.history.openConversation"), () => surface.navigation?.openAgent({ agentId: state.agentId! }), false, "MessageSquare", true)}
+          {state && button(t("research.resetMember"), () => setResetId(member.id), restart.isPending || transferring, "RotateCcw", true)}
+          <View style={{ flex: 1 }} />
+          {button(t("role.remove"), () => { setOpenMember(null); setDraft({ ...draft, members: draft.members.filter((_, i) => i !== index) }); }, false, "Trash2", true, false, true)}
+        </View>
+      </>; })()}
+      {resetId === member.id && <View style={{ gap: 6 }}><Text style={{ color: c.foreground }}>{t("research.resetHint")}</Text>{button(t("current.restartConfirm"), () => restart.mutate(member.id), restart.isPending || transferring, "RotateCcw", false, false, true)}{button(t("review.cancel"), () => setResetId(null), false, "X", true)}</View>}
       </View>}
     </View>)}
-    {button(t("research.addMember"), () => { setOpenMember(draft.members.length); setShowLaunch(false); setDraft({ ...draft, members: [...draft.members, { id: nextId("member", draft.members.map(member => member.id)), roleId: draft.roles[0]?.id ?? "", launchSnapshot: { provider: "", model: "" } }] }); })}
+    {button(t("research.addMember"), () => { setOpenMember(draft.members.length); setDraft({ ...draft, members: [...draft.members, { id: nextId("member", draft.members.map(member => member.id)), roleId: draft.roles[0]?.id ?? "", launchSnapshot: { provider: "", model: "" } }] }); })}
     </>}
-    {!parsed.success && <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>{t(needsProfiles ? "research.ui.chooseProfiles" : "research.ui.requiredSettings")}</Text>}
+    {!parsed.success && <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>{t(needsLaunchSettings ? "research.ui.chooseProfiles" : "research.ui.requiredSettings")}</Text>}
     {save.isPending && <Text style={{ color: c.foregroundMuted }}>{t("research.applying")}</Text>}
     {saved && <Text style={{ color: c.statusSuccess }}>{t("research.saved")}</Text>}
-    {(save.error || restart.error) && <Text style={{ color: c.statusDanger }}>{String(save.error ?? restart.error)}</Text>}
+    {(save.error || restart.error || reload.error) && <Text style={{ color: c.statusDanger }}>{String(save.error ?? restart.error ?? reload.error)}</Text>}
     </ScrollView>
   </View>;
 }

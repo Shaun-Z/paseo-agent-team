@@ -7,6 +7,7 @@ import { MEMBER_LABEL, ResearchTeamSchema, runtimeFile, TEAM_LABEL, type Researc
 import type { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/research-rpc";
 import { allPages } from "./pagination";
 import { applyResearch } from "./research-team";
+import { isTeamConfigFile, parseTeamConfig, serializeTeamConfig } from "./team-config";
 
 type Api = PluginHandlerContext["paseo"];
 type Target = { workspaceId: string } | { projectId: string };
@@ -31,13 +32,16 @@ export async function projectOf(paseo: Api, target: Target): Promise<Project> {
 
 /** Only member/Profile team definitions participate in the current workflow. */
 export async function projectTeams(project: Project): Promise<{ teams: TeamFile[]; names: string[]; errors: string[] }> {
-  const single = await access(join(project.root, ".agents/team.json")).then(() => [".agents/team.json"], () => []);
+  const single = (await Promise.all(["json", "yaml", "yml"].map(ext => {
+    const file = `.agents/team.${ext}`;
+    return access(join(project.root, file)).then(() => [file], () => []);
+  }))).flat();
   const entries = await readdir(join(project.root, ".agents/teams")).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
-  const names = [...single, ...entries.filter(name => name.endsWith(".json")).sort().map(name => `.agents/teams/${name}`)];
+  const names = [...single, ...entries.filter(isTeamConfigFile).sort().map(name => `.agents/teams/${name}`)];
   const teams: TeamFile[] = [], errors: string[] = [];
   for (const file of names) {
     try {
-      const value: unknown = JSON.parse(await readFile(join(project.root, file), "utf8"));
+      const value = parseTeamConfig(file, await readFile(join(project.root, file), "utf8"));
       // Retired definitions stay on disk; they are neither converted nor managed.
       if (value && typeof value === "object" && "version" in value && value.version === 1) continue;
       const parsed = ResearchTeamSchema.safeParse(value);
@@ -58,8 +62,8 @@ export function teamFileFor(team: ResearchTeam, files: readonly TeamFile[], name
   if (existing) return existing.file;
   const base = key(team.workspace).replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "") || "team";
   const taken = new Set(names.map(key));
-  let file = `.agents/teams/${base}.json`;
-  for (let n = 2; taken.has(key(file)); n++) file = `.agents/teams/${base}-${n}.json`;
+  let file = `.agents/teams/${base}.yaml`;
+  for (let n = 2; taken.has(key(file)); n++) file = `.agents/teams/${base}-${n}.yaml`;
   return file;
 }
 export async function projectTeamsList(_input: RpcInput<typeof teamProjectsRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProjectsRpc>> {
@@ -100,7 +104,8 @@ export async function reconnectTeam({ projectId, file, workspaceId }: RpcInput<t
   if (!workspace) return { ok: false, errors: [`Workspace ${workspaceId} was not found in ${project.name}.`] };
   const title = workspaceLabel(workspace);
   if (listing.teams.some(entry => entry.file !== file && key(entry.team.workspace) === key(title))) return { ok: false, errors: [`Workspace "${title}" belongs to another team.`] };
-  await writeFile(join(project.root, file), JSON.stringify({ ...own.team, workspace: title }, null, 2) + "\n", "utf8");
+  const source = await readFile(join(project.root, file), "utf8");
+  await writeFile(join(project.root, file), serializeTeamConfig(file, { ...own.team, workspace: title }, source), "utf8");
   return { ok: true, files: [file] };
 }
 export async function restoreTeam({ projectId, file }: RpcInput<typeof teamRestoreRpc>, ctx: PluginHandlerContext): Promise<RpcOutput<typeof teamRestoreRpc>> {

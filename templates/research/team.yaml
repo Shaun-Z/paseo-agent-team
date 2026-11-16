@@ -1,0 +1,42 @@
+# Optional example, not a default team. Copy to .agents/team.yaml in your Project.
+# Fill launchSnapshot manually or from an optional Paseo Profile.
+version: 2
+id: research-team
+workspace: Research # Must match the intended Workspace title.
+goal: |
+  Investigate the method, verify the theory and run reproducible experiments.
+commonPromptFiles:
+  - prompts/research-team-common.md
+orchestratorMemberId: anchor-main
+
+roles:
+  - id: anchor
+    name: Anchor
+    promptFiles:
+      - prompts/anchor.md
+  - id: programmer
+    name: Programmer
+    promptFiles:
+      - prompts/programmer.md
+  - id: mathematician
+    name: Mathematician
+    promptFiles:
+      - prompts/mathematician.md
+
+members:
+  - id: anchor-main
+    roleId: anchor
+    launchSnapshot:
+      provider: YOUR_PROVIDER
+      model: YOUR_MODEL
+  - id: programmer-main
+    roleId: programmer
+    launchSnapshot:
+      provider: YOUR_PROVIDER
+      model: YOUR_MODEL
+      # Preserve modeId, thinkingOptionId and featureValues if set in your Profile.
+  - id: mathematician-main
+    roleId: mathematician
+    launchSnapshot:
+      provider: YOUR_PROVIDER
+      model: YOUR_MODEL

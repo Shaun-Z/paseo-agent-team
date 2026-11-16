@@ -1,14 +1,16 @@
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from "node:fs/promises";
+import { parse } from "yaml";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyResearch, readPrompt, readResearch, resetResearchMember } from "../server/research-team";
+import { applyResearch, exportResearch, loadResearch, readPrompt, readResearch, resetResearchMember } from "../server/research-team";
 import { projectTeams, projectTeamsList, reconnectTeam, restoreTeam, deleteTeam } from "../server/team-directory";
 import { buildAgentForest, filterForest } from "../shared/agent-tree";
 import { allPages } from "../server/pagination";
-import { CONFIG_LABEL, MEMBER_LABEL, runtimeFile, TEAM_LABEL } from "../shared/research-team";
+import { CONFIG_LABEL, MEMBER_LABEL, ResearchTeamSchema, runtimeFile, TEAM_LABEL } from "../shared/research-team";
 import { teamFixture } from "./fixtures/research";
+import { serializeTeamConfig } from "../server/team-config";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture() {
@@ -37,7 +39,7 @@ async function fixture() {
   const profiles = [{ id: "profile", name: "Configured", provider: "test", model: "m", modeId: "ask", featureValues: { flag: false } }];
   const api = {
     projects: { list: async () => ({ projects: [project] }) },
-    providers: { snapshot: async () => ({ entries: ["test", "other"].map(provider => ({ provider, enabled: true, status: "ready", models: [{ id: "m", label: "M" }], modes: [{ id: "auto" }] })) }) },
+    providers: { snapshot: async () => ({ entries: ["test", "other"].map(provider => ({ provider, enabled: true, status: "ready", models: [{ id: "m", label: "M" }, { id: "alternative", label: "Alternative" }], modes: [{ id: "auto" }] })) }) },
     config: { get: async () => ({ config: { agentProfiles: profiles } }) },
     workspaces: { list: async () => ({ entries: [workspace] }), ref: () => ({ refresh: async () => workspace, agents: { create } }) },
     agents: { list: async () => ({ entries: agents.map(agent => ({ agent })) }), ref: (id: string) => ({ archive: () => archive(id) }) },
@@ -46,6 +48,129 @@ async function fixture() {
   return { root, ctx, workspace, agents, configs, create, archive, fail: (member: string) => { failMember = member; } };
 }
 describe("research sessions", () => {
+  it("loads a configuration into an empty Workspace without creating sessions", async () => {
+    const f = await fixture(), team = { ...teamFixture(), workspace: "Portable Workspace" };
+    await writeFile(join(f.root, "portable.yml"), "# Portable team\n" + serializeTeamConfig("portable.yml", team));
+    const result = await loadResearch({ workspaceId: "wks", path: "portable.yml" }, f.ctx);
+    expect(result.file).toBe(join(f.root, ".agents/teams/research.yaml"));
+    expect(parse(await readFile(result.file, "utf8"))).toEqual({ ...team, workspace: "research" });
+    expect(await readFile(result.file, "utf8")).toContain("# Portable team");
+    expect((await readResearch({ workspaceId: "wks" }, f.ctx)).team?.id).toBe(team.id);
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.archive).not.toHaveBeenCalled();
+  });
+
+  it.each(["json", "yaml", "yml"])("replaces an existing %s file while preserving Workspace identity, sessions and unchanged Profile bindings", async ext => {
+    const f = await fixture(), team = teamFixture(), file = `.agents/team.${ext}`;
+    await mkdir(join(f.root, ".agents"));
+    await writeFile(join(f.root, file), serializeTeamConfig(file, team));
+    await applyResearch({ workspaceId: "wks", team, bindings: { lead: "profile", "coder-a": "profile" } }, f.ctx);
+    const originalIds = f.agents.map(agent => agent.id);
+    const incoming = { ...team, id: "portable-id", workspace: "foreign-title", goal: "Imported goal", members: team.members.map(member => member.id === "coder-a" ? { ...member, launchSnapshot: { ...member.launchSnapshot, thinkingOptionId: "medium" } } : member) };
+    const source = join(f.root, "portable.yaml");
+    await writeFile(source, serializeTeamConfig(source, incoming));
+    const result = await loadResearch({ workspaceId: "wks", path: source }, f.ctx);
+    expect(result.file).toBe(join(f.root, file));
+    expect(parse(await readFile(result.file, "utf8"))).toEqual({ ...incoming, id: team.id, workspace: "research" });
+    if (ext === "json") expect(JSON.parse(await readFile(result.file, "utf8")).goal).toBe("Imported goal");
+    const observed = await readResearch({ workspaceId: "wks" }, f.ctx);
+    expect(observed.bindings).toEqual({ lead: "profile" });
+    expect(observed.members.find(member => member.id === "coder-a")?.pending).toBe(true);
+    expect(f.agents.map(agent => agent.id)).toEqual(originalIds);
+    expect(f.create).toHaveBeenCalledTimes(3);
+    expect(f.archive).not.toHaveBeenCalled();
+  });
+
+  it.each(["id: [", "version: 1\n", "id: first\nid: second\n"])("does not change the saved configuration or routing when Load rejects %s", async invalid => {
+    const f = await fixture(), team = teamFixture();
+    const applied = await applyResearch({ workspaceId: "wks", team, bindings: { lead: "profile" } }, f.ctx);
+    const before = await readFile(applied.file, "utf8"), directory = await readFile(join(f.root, runtimeFile(team.id)), "utf8");
+    await writeFile(join(f.root, "invalid.yaml"), invalid);
+    await expect(loadResearch({ workspaceId: "wks", path: "invalid.yaml" }, f.ctx)).rejects.toThrow();
+    expect(await readFile(applied.file, "utf8")).toBe(before);
+    expect(await readFile(join(f.root, runtimeFile(team.id)), "utf8")).toBe(directory);
+    expect(f.create).toHaveBeenCalledTimes(3);
+    expect(f.archive).not.toHaveBeenCalled();
+  });
+
+  it("rejects a conflicting imported Team ID before writing a new Workspace definition", async () => {
+    const f = await fixture(), team = teamFixture();
+    await mkdir(join(f.root, ".agents/teams"), { recursive: true });
+    await writeFile(join(f.root, ".agents/teams/other.yaml"), serializeTeamConfig("other.yaml", { ...team, workspace: "other" }));
+    await writeFile(join(f.root, "portable.json"), JSON.stringify(team));
+    await expect(loadResearch({ workspaceId: "wks", path: "portable.json" }, f.ctx)).rejects.toThrow("already belongs");
+    expect((await projectTeams({ id: "prj", name: "P", root: f.root })).teams).toHaveLength(1);
+    expect(f.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["yaml", "yml", "json"])("exports saved configuration as %s without runtime data or session effects", async ext => {
+    const f = await fixture(), team = teamFixture();
+    const applied = await applyResearch({ workspaceId: "wks", team, bindings: { lead: "private-profile-id" } }, f.ctx);
+    const original = await readFile(applied.file, "utf8");
+    await writeFile(applied.file, "# Saved comment\n" + original);
+    const result = await exportResearch({ workspaceId: "wks", path: `exports/team.${ext}`, overwrite: false }, f.ctx);
+    const output = await readFile(result.file, "utf8");
+    expect(parse(output)).toEqual(team);
+    if (ext !== "json") expect(output).toBe("# Saved comment\n" + original);
+    else expect(JSON.parse(output)).toEqual(team);
+    expect(output).not.toContain("private-profile-id");
+    expect(output).not.toContain(f.agents[0].id);
+    expect(await readFile(applied.file, "utf8")).toBe("# Saved comment\n" + original);
+    expect(f.create).toHaveBeenCalledTimes(3);
+    expect(f.archive).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit overwrite for an existing export destination", async () => {
+    const f = await fixture(), team = teamFixture();
+    await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
+    const path = join(f.root, "export.json");
+    await writeFile(path, "existing file");
+    await expect(exportResearch({ workspaceId: "wks", path, overwrite: false }, f.ctx)).rejects.toThrow("EEXIST");
+    expect(await readFile(path, "utf8")).toBe("existing file");
+    await exportResearch({ workspaceId: "wks", path, overwrite: true }, f.ctx);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual(team);
+  });
+
+  it("refuses export without a saved configuration or into active configuration/runtime paths", async () => {
+    const f = await fixture();
+    await expect(exportResearch({ workspaceId: "wks", path: "export.yaml", overwrite: false }, f.ctx)).rejects.toThrow("before exporting");
+    const applied = await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
+    const original = await readFile(applied.file, "utf8");
+    for (const path of [".agents/team.json", ".agents/teams/research.yaml", runtimeFile("research")]) await expect(exportResearch({ workspaceId: "wks", path, overwrite: true }, f.ctx)).rejects.toThrow("outside this Project");
+    expect(await readFile(applied.file, "utf8")).toBe(original);
+    await expect(loadResearch({ workspaceId: "wks", path: "missing.yaml" }, f.ctx)).rejects.toThrow("ENOENT");
+    await expect(loadResearch({ workspaceId: "wks", path: "notes.md" }, f.ctx)).rejects.toThrow(".json, .yaml or .yml");
+  });
+
+  it("protects active export locations reached through a symlink", async () => {
+    const f = await fixture();
+    const applied = await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
+    await symlink(join(f.root, ".agents/teams"), join(f.root, "alias"));
+    await expect(exportResearch({ workspaceId: "wks", path: "alias/research.yaml", overwrite: true }, f.ctx)).rejects.toThrow("outside this Project");
+    expect(parse(await readFile(applied.file, "utf8")).id).toBe("research");
+  });
+  it.each([".agents/team.json", ".agents/team.yaml", ".agents/team.yml", ".agents/teams/manual.json", ".agents/teams/manual.yaml", ".agents/teams/manual.yml"])("configures members directly from %s and retains its format on Apply", async file => {
+    const f = await fixture(), team = teamFixture();
+    await mkdir(join(f.root, file.slice(0, file.lastIndexOf("/"))), { recursive: true });
+    const source = (file.endsWith("json") ? "" : "# User configuration\n") + serializeTeamConfig(file, team);
+    await writeFile(join(f.root, file), source);
+    const loaded = await readResearch({ workspaceId: "wks" }, f.ctx);
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.team).toEqual(team);
+    expect(loaded.file).toBe(file);
+    expect(f.create).not.toHaveBeenCalled();
+    const result = await applyResearch({ workspaceId: "wks", team: ResearchTeamSchema.parse(loaded.team), bindings: {} }, f.ctx);
+    expect(result.file).toBe(join(f.root, file));
+    expect(parse(await readFile(result.file, "utf8"))).toEqual(team);
+    if (!file.endsWith("json")) expect(await readFile(result.file, "utf8")).toBe(source);
+    expect(f.create).toHaveBeenCalledTimes(3);
+    const edited = { ...team, goal: "Edited in a file" };
+    await writeFile(result.file, serializeTeamConfig(file, edited, source));
+    const refreshed = await readResearch({ workspaceId: "wks" }, f.ctx);
+    expect(refreshed.team?.goal).toBe("Edited in a file");
+    await applyResearch({ workspaceId: "wks", team: ResearchTeamSchema.parse(refreshed.team), bindings: {} }, f.ctx);
+    expect(f.create).toHaveBeenCalledTimes(3);
+  });
   it("keeps research members visible in All agents without legacy waiting duplicates", async () => {
     const f = await fixture();
     await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
@@ -74,6 +199,32 @@ describe("research sessions", () => {
     expect(new Set(directory.members.map((m: {agentId: string}) => m.agentId)).size).toBe(3);
     expect(directory.bindings["coder-a"]).toBe("profile");
     expect(await readFile(join(f.root, ".gitignore"), "utf8")).toContain("/.agents/.runtime/paseo-agent-team/");
+  });
+  it("uses member overrides instead of its source Profile and saves manual changes without resetting sessions", async () => {
+    const f = await fixture(), team = teamFixture();
+    team.members[0].launchSnapshot = { provider: "test", model: "alternative", modeId: "plan", thinkingOptionId: "medium", featureValues: { flag: false, custom: { limit: 3 } } };
+    await applyResearch({ workspaceId: "wks", team, bindings: { lead: "profile" } }, f.ctx);
+    expect(f.configs[0]).toMatchObject({ provider: "test/alternative", modeId: "plan", thinkingOptionId: "medium", featureValues: { flag: false, custom: { limit: 3 } } });
+    const first = await readResearch({ workspaceId: "wks" }, f.ctx);
+    expect(first.bindings.lead).toBe("profile");
+    expect(first.profiles[0]).toMatchObject({ model: "m", modeId: "ask", featureValues: { flag: false } });
+    expect(first.team!.members[0].launchSnapshot).toEqual(team.members[0].launchSnapshot);
+
+    // Switching to manual detaches the Profile but preserves the member's settings.
+    delete team.members[0].launchSnapshot.modeId;
+    team.members[0].launchSnapshot.thinkingOptionId = "low";
+    await applyResearch({ workspaceId: "wks", team, bindings: { lead: "" } }, f.ctx);
+    expect(f.create).toHaveBeenCalledTimes(3);
+    expect(f.archive).not.toHaveBeenCalled();
+    const changed = await readResearch({ workspaceId: "wks" }, f.ctx);
+    expect(changed.bindings).not.toHaveProperty("lead");
+    expect(changed.members.map(member => member.pending)).toEqual([true, false, false]);
+    expect(changed.team!.members[0].launchSnapshot).toEqual(team.members[0].launchSnapshot);
+
+    await resetResearchMember({ workspaceId: "wks", memberId: "lead" }, f.ctx);
+    expect(f.configs.at(-1)).toMatchObject({ provider: "test/alternative", thinkingOptionId: "low", featureValues: { flag: false, custom: { limit: 3 } } });
+    expect(f.configs.at(-1)).not.toHaveProperty("modeId");
+    expect((await readResearch({ workspaceId: "wks" }, f.ctx)).profiles).toEqual(first.profiles);
   });
   it("marks changed prompts pending, resets only the selected member and retains other sessions", async () => {
     const f = await fixture(), team = teamFixture();
@@ -141,7 +292,7 @@ describe("research sessions", () => {
     expect(f.create).toHaveBeenCalledTimes(3);
     f.workspace.title = "renamed";
     await reconnectTeam({ projectId: "prj", file: listing.teams[0]!.file, workspaceId: "wks" }, f.ctx);
-    const stored = JSON.parse(await readFile(applied.file, "utf8"));
+    const stored = parse(await readFile(applied.file, "utf8"));
     expect(stored.version).toBe(2);
     expect(stored.workspace).toBe("renamed");
     expect(stored.members).toHaveLength(3);
@@ -165,7 +316,7 @@ describe("research sessions", () => {
     expect(empty.file).toBeNull();
     expect(empty.errors).toEqual([]);
     const created = await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
-    expect(created.file).toBe(join(f.root, ".agents/teams/research-2.json"));
+    expect(created.file).toBe(join(f.root, ".agents/teams/research.yaml"));
     expect(await readFile(oldFile, "utf8")).toBe(original);
     expect(f.archive).not.toHaveBeenCalled();
     expect((await readResearch({ workspaceId: "wks" }, f.ctx)).team?.members).toHaveLength(3);
@@ -208,12 +359,12 @@ describe("research sessions", () => {
   it("retains the definition after an archive failure so deletion can be retried", async () => {
     const f = await fixture();
     const applied = await applyResearch({ workspaceId: "wks", team: teamFixture(), bindings: {} }, f.ctx);
-    const file = ".agents/teams/research.json";
+    const file = ".agents/teams/research.yaml";
     f.archive.mockRejectedValueOnce(new Error("offline"));
     const failed = await deleteTeam({ projectId: "prj", file }, f.ctx);
     expect(failed.files).toEqual([]);
     expect(failed.failures).toHaveLength(1);
-    expect(JSON.parse(await readFile(applied.file, "utf8")).version).toBe(2);
+    expect(parse(await readFile(applied.file, "utf8")).version).toBe(2);
     const retried = await deleteTeam({ projectId: "prj", file }, f.ctx);
     expect(retried.failures).toEqual([]);
     expect(retried.files).toEqual([file]);
@@ -223,9 +374,9 @@ describe("research sessions", () => {
     const applied = await applyResearch({ workspaceId: "wks", team, bindings: {} }, f.ctx);
     await writeFile(join(f.root, ".agents/teams/other.json"), JSON.stringify({ ...team, id: "other", workspace: "occupied" }));
     f.workspace.title = "occupied";
-    const result = await reconnectTeam({ projectId: "prj", file: ".agents/teams/research.json", workspaceId: "wks" }, f.ctx);
+    const result = await reconnectTeam({ projectId: "prj", file: ".agents/teams/research.yaml", workspaceId: "wks" }, f.ctx);
     expect(result.ok).toBe(false);
-    expect(JSON.parse(await readFile(applied.file, "utf8")).workspace).toBe("research");
+    expect(parse(await readFile(applied.file, "utf8")).workspace).toBe("research");
   });
   it("rejects prompt traversal and symlinks outside the project", async () => {
     const f = await fixture();

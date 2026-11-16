@@ -102,7 +102,7 @@ Apply 为预配置成员创建或复用长期会话。新建普通成员时不�
 
 修改 prompt 或 Profile 后，界面显示配置待应用。当前实现提供显式重置该成员会话的方式；普通任务、查看会话、刷新关系图都不触发重置。旧会话历史保留，新会话更新同一成员的运行态映射。
 
-成员的当前参数直接读取 Paseo 会话快照：模型、mode、thinking 选择与实际生效的 thinking 分别保留。Dashboard 展示当前模型及生效 thinking；配置摘要和编辑区同时显示保存参数与当前参数。模型、显式 mode 或 thinking 选择变化标为“与保存参数不同”，与指纹的“配置待应用”分开。默认值和 auto 解析为具体 thinking 不作为手动改参；未报告的值显示“未报告”。通过 agent 更新订阅和定时刷新同步，只读展示不改写团队文件；Apply 复用当前会话，显式重置仍使用保存参数。
+成员的当前参数直接读取 Paseo 会话快照：模型、mode、thinking 选择与实际生效的 thinking 分别保留。Dashboard 展示当前模型及生效 thinking；成员编辑区同时显示保存参数与当前参数。模型、显式 mode 或 thinking 选择变化标为“与保存参数不同”，与指纹的“配置待应用”分开。默认值和 auto 解析为具体 thinking 不作为手动改参；未报告的值显示“未报告”。通过 agent 更新订阅和定时刷新同步，只读展示不改写团队文件；Apply 复用当前会话，显式重置仍使用保存参数。
 
 依据：[会话创建配置](https://github.com/getpaseo/paseo/blob/v0.13.0/packages/client/src/index.ts#L237)、[创建参数](https://github.com/getpaseo/paseo/blob/v0.15.3/packages/client/src/index.ts#L249)。
 
@@ -183,7 +183,7 @@ Timeline 订阅只提供实时事件，需要结合 `refetch()` 补拉历史，�
 
 ## 当前交付范围
 
-已保存研究团队的 Agent team 页签展示团队配置，分为“成员”和“角色与 Prompt”：前者列出保存的 Profile 启动参数，后者列出 common、角色 prompt 文件及团队定义路径，支持直接编辑对应成员或角色。“编辑配置”进入独立编辑视图，按基本设置、角色、成员切换，一次只展开一个角色或成员，启动参数默认折叠，应用与取消按钮固定在顶部。
+Agent team 直接打开唯一的配置编辑器，新建和已保存团队采用同一个界面，按基本设置、角色、成员切换；删除独立的配置摘要组件及其编辑入口。基本设置保留 common prompt 与团队文件路径，成员区保留保存/当前参数对照、原生会话入口、待应用状态和显式重置。Apply 后留在编辑器，取消仅恢复保存的草稿、不写文件或改变会话。
 
 Agent dashboard 页签展示团队运行情况：“概览”包含紧凑成员卡片、关系图及最多五条最近消息，宽面板左右并排显示；完整历史位于其中的“时间线”页。两个页签可在同一 Workspace 内相互跳转。
 
@@ -231,3 +231,43 @@ Anchor 的 `featureValues` 保留为 `approvalPolicy: skip`、`sandbox: on`、`s
 ```bash
 PASEO_RESEARCH_E2E=1 PASEO_RESEARCH_PEER_APPROVAL=1 npx vitest run tests/research-live.e2e.test.ts
 ```
+
+### 团队配置入口
+
+Agent team 保留两种配置方式：点击“创建配置”打开空白编辑器，或从 JSON/YAML 团队定义文件加载。用户显式填写 Role、Prompt 路径、成员，选择 Profile 与 Orchestrator；不扫描 `prompt/` 或 `prompts/`，不从文件名推断 Role，也不预填默认角色或成员。“创建配置”只创建本地草稿，Apply 才写入 YAML 文件并准备空闲会话。两种方式使用同一个编辑器，已有文件保持格式，支持重新加载、检查、修改及 Apply。
+
+### JSON / YAML 文件配置
+
+团队定义是整个团队的声明式配置，支持 `.agents/team.json`、`.agents/team.yaml`、`.agents/team.yml` 和 `.agents/teams/` 下三种扩展名。新建默认 YAML；已存在文件保持路径和格式，不迁移。不同格式共用 v2 校验，重复团队或 Workspace 归属时报错，不按扩展名隐式选择。
+
+用户可以在外部编辑 Role、common prompt、成员、`launchSnapshot` 和 Orchestrator。工作区编辑器提供“从文件重新加载”，显式替换未保存草稿，再由 Apply 准备空闲会话；已有会话保留，启动参数或 Prompt 变化仍需逐成员显式重置。仅保存配置文件不会执行调度。Host-local Profile 绑定与会话 ID 仍写入运行时 JSON。
+
+YAML 使用 1.2 语义，支持注释和多行文本，拒绝重复键、多个文档、无效语法及不能表示为 JSON 的数值或循环引用。保存时尽量保留已有节点和注释；alias 相关变更若影响其他成员参数，则从校验后的团队数据重新生成，确保不会串改启动参数。可选示例位于 `templates/research/team.yaml`，不会作为默认配置自动加载。
+
+### Load / Export
+
+工作区 Agent team 提供 Load 与 Export，通过路径输入访问当前所选 Paseo Host 文件，支持 Project 相对路径、绝对路径及 `~/`。目录浏览器与路径输入均访问该 agent 主机，不调用客户端系统文件选择器，不扫描 Prompt 目录。
+
+Load 校验 v2 JSON/YAML/YML 后立即覆盖该工作区配置并重新加载编辑器，保留目标 Workspace 标题和已有 Team ID，避免会话关联丢失；尚无团队时使用导入 ID 并检查其他 Workspace 的占用。已有配置文件的路径和格式不变，新文件默认 YAML。Prompt 路径仍相对目标 Project 根目录。运行时会话 ID 保留，未改启动参数的成员保留 Profile 绑定，改过参数的成员清除过期绑定。Load 不创建、归档、重置或调度会话，Apply/显式重置语义不变。
+
+Export 读取磁盘已保存团队配置，导出到指定位置；不包含编辑器草稿或运行时目录。按目标扩展名选择 JSON/YAML，同格式保留原文及注释，转换时序列化校验后的配置。自动创建父目录，覆盖已有导出文件必须显式勾选；拒绝写入当前 Project 的活动团队定义位置或插件运行时目录。服务端使用同一 Project 操作队列和原子写入；未允许覆盖时使用独占目标创建，避免并发覆盖现有文件。
+
+Agent team 未配置时保留“创建配置”与 Load/Export 操作，移除旧的“Load a configuration file”独立说明框；路径输入和加载说明只在点击 Load 后展开，避免重复入口。已有编辑器中的“从文件重新加载”继续用于刷新当前配置文件。
+
+### Agent 主机目录浏览与 Prompt 下拉
+
+Load / Export 使用 `research.browse-host` 读取当前 agent 主机的指定目录。用户在 raspi5 Workspace 内看到 raspi5 的文件，不是运行 Paseo 客户端的 Mac 文件。不保留客户端上传/下载或系统文件对话框逻辑。
+
+浏览器默认 Project 根目录，支持手动填写目录（绝对路径、Project 相对路径、`~/`）、前往、Project/Home/上级快捷入口、筛选和刷新。Load 点击配置文件后，确认“加载并覆盖配置”才写入；Export 进入目录并填写文件名，预览完整目标路径后确认导出。只列一层文件夹和 JSON/YAML/YML，包含隐藏目录和可读 symlink，每层最多 300 项；支持权限允许的 Project 外位置，原有主机路径手动输入继续保留。浏览和选择不会改变配置或会话，覆盖语义与保护规则不变。
+
+Common 与 Role Prompt 文件提供按需展开的目录下拉、多选、当前目录筛选、上级与刷新。通过目标 Project 的目录 RPC 仅列出用户请求的一层，不递归扫描或推断 Role；返回项目相对路径，包含隐藏目录，跳过 symlink，每目录最多 300 项。路径越界与逃逸 symlink 目录会被拒绝；手动输入路径继续保留，选择仅修改草稿。
+
+### 配置界面与操作层级
+
+Agent team 顶部采用紧凑图标工具栏：Load、Export、重新加载和取消草稿都有翻译后的无障碍名称与悬停/聚焦提示，Apply 和“创建配置”保留文字主按钮。基本设置、Role、成员使用带数量的分段导航，空列表显示简短指引；成员 Profile 使用下拉列表，移除、设置 Orchestrator、打开会话与重置使用紧凑图标操作。
+
+Load / Export 在 Paseo SDK Modal 中操作，窄客户端由宿主转为 sheet。主机目录工具栏使用图标，文件行统一显示文件夹/文件图标和选中标记；详细说明按需展开。弹窗内使用 SDK ScrollView/TextInput 以对齐移动端手势与键盘。页面配置与会话生命周期语义不变。
+
+### 成员启动参数的手动编辑
+
+Profile 是可选模板。未选择 Profile 时也能手动配置 Provider、模型、mode 和 thinking；选择 Profile 会复制一套参数，之后仍可继续编辑该成员，不修改全局 Profile。输入框提供当前 Host 的目录选项，Provider 功能区读取原生开关和枚举选项；目录刷新不选取默认值，也不覆盖草稿中的自定义参数。来源 Profile 绑定仅用于记录来源和显示差异，切换“手动配置”解除绑定但保留参数。启动始终以成员的 `launchSnapshot` 为准；Apply 保存参数并复用已有会话，显式重置才将新参数用于该成员的新会话。

@@ -2,7 +2,23 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { AgentProfileSchema, ResearchTeamSchema } from "./research-team";
 import { SessionSettingsSchema } from "./member-settings";
+import { GitChangeSchema } from "./git-team";
 const target = z.union([z.object({ workspaceId: z.string() }), z.object({ projectId: z.string() })]);
+export const researchGitFetchRpc = defineRpc({ name: "research.git.fetch", input: target.and(z.object({ repository: z.string().trim().min(1), ref: z.string().trim().default("HEAD") })), output: z.object({
+  sourceId: z.string(), commit: z.string(), configFiles: z.array(z.string()),
+}) });
+export const researchGitCompareRpc = defineRpc({ name: "research.git.compare", input: target.and(z.object({ sourceId: z.string(), configFile: z.string(), workspaceName: z.string().trim().optional() })), output: z.object({
+  planId: z.string(), commit: z.string(), configFile: z.string(), before: ResearchTeamSchema.nullable(), incoming: ResearchTeamSchema, changes: z.array(GitChangeSchema),
+}) });
+export const researchGitImportRpc = defineRpc({ name: "research.git.import", input: target.and(z.object({ planId: z.string(), selected: z.array(z.string()).min(1) })), output: z.object({ file: z.string(), team: ResearchTeamSchema, changedFiles: z.array(z.string()) }) });
+export const researchPromptFilesRpc = defineRpc({ name: "research.prompt-files", input: target.and(z.object({ directory: z.string().default("") })), output: z.object({
+  directory: z.string(), parent: z.string().nullable(), truncated: z.boolean(),
+  entries: z.array(z.object({ name: z.string(), path: z.string(), kind: z.enum(["file", "directory"]) })),
+}) });
+export const researchBrowseHostRpc = defineRpc({ name: "research.browse-host", input: z.object({ workspaceId: z.string(), directory: z.string().default("") }), output: z.object({
+  directory: z.string(), parent: z.string().nullable(), projectRoot: z.string(), home: z.string(), truncated: z.boolean(),
+  entries: z.array(z.object({ name: z.string(), path: z.string(), kind: z.enum(["file", "directory"]) })),
+}) });
 export const MemberStateSchema = z.object({
   id: z.string(), agentId: z.string().nullable(), status: z.string(), pending: z.boolean(), error: z.string().nullable(),
   sessionSettings: SessionSettingsSchema.nullable(), settingsChanged: z.boolean(),
@@ -17,6 +33,8 @@ export const researchApplyRpc = defineRpc({ name: "research.apply", input: targe
   team: ResearchTeamSchema, bindings: z.record(z.string(), z.string()).default({}),
 })), output: z.object({ workspaceId: z.string(), orchestratorAgentId: z.string(), file: z.string() }) });
 export const researchResetRpc = defineRpc({ name: "research.reset", input: z.object({ workspaceId: z.string(), memberId: z.string() }), output: z.object({ agentId: z.string() }) });
+export const researchLoadRpc = defineRpc({ name: "research.load", input: z.object({ workspaceId: z.string(), path: z.string().trim().min(1) }), output: z.object({ file: z.string() }) });
+export const researchExportRpc = defineRpc({ name: "research.export", input: z.object({ workspaceId: z.string(), path: z.string().trim().min(1), overwrite: z.boolean().default(false) }), output: z.object({ file: z.string() }) });
 
 export const teamProjectsRpc = defineRpc({ name: "team.projects", input: z.object({}), output: z.array(z.object({
   id: z.string(), name: z.string(), root: z.string(),
